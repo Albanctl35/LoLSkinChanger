@@ -21,13 +21,14 @@ import argparse
 import os, sys, time, json, logging, threading
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, List, Dict, Any
+import subprocess
 
 import numpy as np
 import cv2
 import psutil
 import requests
+from rapidfuzz import process as rf_process, fuzz as rf_fuzz
 from rapidfuzz.distance import Levenshtein
-from tesserocr import PyTessBaseAPI, PSM
 import unicodedata, re
 import ssl, base64
 
@@ -100,23 +101,42 @@ class OCR:
         self.psm = int(psm)
         self.backend = None
         self.api = None
-        tessdata_dir = getattr(self, "tessdata_dir", None) or os.environ.get("TESSDATA_PREFIX")
-        if tessdata_dir and not tessdata_dir.lower().endswith("tessdata"):
-            cand = os.path.join(tessdata_dir, "tessdata")
-            if os.path.isdir(cand):
-                tessdata_dir = cand
-        psm_mode = PSM.SINGLE_LINE if self.psm == 7 else PSM.AUTO
-        if tessdata_dir and os.path.isdir(tessdata_dir):
-            self.api = PyTessBaseAPI(path=tessdata_dir, lang=self.lang, psm=psm_mode)
-        else:
-            self.api = PyTessBaseAPI(lang=self.lang, psm=psm_mode)
-        self.api.SetVariable("preserve_interword_spaces", "1")
-        self.api.SetVariable("user_defined_dpi", "240")
-        self.api.SetVariable("tessedit_char_whitelist",
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-            "ÀÂÄÃÇÉÈÊËÎÏÌÍÔÖÒÓÙÛÜÚàâäãçéèêëîïìíôöòóùûüúÑñ"
-            "0123456789 .-':")
-        self.backend = "tesserocr"
+        try:
+            import tesserocr
+            from tesserocr import PyTessBaseAPI, PSM
+            tessdata_dir = getattr(self, "tessdata_dir", None) or os.environ.get("TESSDATA_PREFIX")
+            if tessdata_dir and not tessdata_dir.lower().endswith("tessdata"):
+                cand = os.path.join(tessdata_dir, "tessdata")
+                if os.path.isdir(cand):
+                    tessdata_dir = cand
+            psm_mode = PSM.SINGLE_LINE if self.psm == 7 else PSM.AUTO
+            if tessdata_dir and os.path.isdir(tessdata_dir):
+                self.api = PyTessBaseAPI(path=tessdata_dir, lang=self.lang, psm=psm_mode)
+            else:
+                self.api = PyTessBaseAPI(lang=self.lang, psm=psm_mode)
+            self.api.SetVariable("preserve_interword_spaces", "1")
+            self.api.SetVariable("user_defined_dpi", "240")
+            self.api.SetVariable("tessedit_char_whitelist",
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+                "ÀÂÄÃÇÉÈÊËÎÏÌÍÔÖÒÓÙÛÜÚàâäãçéèêëîïìíôöòóùûüúÑñ"
+                "0123456789 .-':")
+            self.backend = "tesserocr"
+        except Exception as e:
+            log.warning(f"tesserocr indisponible, fallback pytesseract: {e}")
+            import pytesseract
+            if tesseract_exe:
+                if os.path.isdir(tesseract_exe):
+                    for c in (
+                        os.path.join(tesseract_exe, "tesseract.exe"),
+                        os.path.join(tesseract_exe, "..", "tesseract.exe"),
+                        os.path.join(tesseract_exe, "bin", "tesseract.exe"),
+                    ):
+                        if os.path.isfile(c):
+                            tesseract_exe = os.path.abspath(c); break
+                if os.path.isfile(tesseract_exe):
+                    pytesseract.pytesseract.tesseract_cmd = tesseract_exe
+            self.pytesseract = pytesseract
+            self.backend = "pytesseract"
 
     def recognize(self, img: np.ndarray) -> str:
         if self.backend == "tesserocr":
@@ -467,6 +487,10 @@ class LCU:
         except Exception: return None
     def my_selection(self) -> Optional[dict]:
         return self.get("/lol-champ-select/v1/session/my-selection") or self.get("/lol-champ-select/v1/selection")
+    def unlocked_skins(self) -> Optional[dict]:
+        return self.get("/lol-champions/v1/owned-champions-minimal")
+    def owned_skins(self) -> Optional[dict]:
+        return self.get("/lol-skins/v1/owned-skins")
 
 # ====================== Utils: locks & players ======================
 def map_cells(sess: Dict[str,Any]) -> Dict[int, Dict[str,Any]]:
@@ -533,6 +557,94 @@ class SharedState:
     timer_lock: threading.Lock = field(default_factory=threading.Lock)
     ticker_seq: int = 0
     current_ticker: int = 0
+    # Owned skins cache
+    owned_skins: set = field(default_factory=set)
+    owned_skins_last_check: float = 0.0
+    
+    def is_skin_owned(self, skin_id: int, lcu: Optional['LCU'] = None) -> bool:
+        """Vérifie si un skin est déjà débloqué par le joueur"""
+        print(f"*** CHECKING SKIN OWNERSHIP *** skinId={skin_id}")
+        if skin_id <= 0 or not lcu:
+            return False
+        
+        # Si le cache est vide depuis plus de 60 secondes, désactiver la vérification
+        now = time.time()
+        if len(self.owned_skins) == 0 and (now - self.owned_skins_last_check) > 60.0:
+            log.debug(f"[owned-skins] API unavailable, assuming all skins are not-owned")
+            return False
+        
+        # Mettre à jour le cache des skins débloqués toutes les 30 secondes
+        if now - self.owned_skins_last_check > 30.0:
+            try:
+                # Essayer plusieurs endpoints LCU pour les skins débloqués
+                owned_data = None
+                
+                # Endpoint 1: /lol-champ-select/v1/session (unlockedSkinIds)
+                log.info(f"[owned-skins] *** TESTING NEW ENDPOINT *** /lol-champ-select/v1/session")
+                session_data = lcu.get("/lol-champ-select/v1/session")
+                log.info(f"[owned-skins] /lol-champ-select/v1/session response: {session_data}")
+                if session_data and isinstance(session_data, dict):
+                    # Chercher entitledFeatureState.unlockedSkinIds
+                    entitled_state = session_data.get('entitledFeatureState', {})
+                    unlocked_skin_ids = entitled_state.get('unlockedSkinIds', [])
+                    if unlocked_skin_ids and isinstance(unlocked_skin_ids, list):
+                        self.owned_skins = set(unlocked_skin_ids)
+                        self.owned_skins_last_check = now
+                        log.info(f"[owned-skins] *** SUCCESS *** cached {len(self.owned_skins)} skins from /lol-champ-select/v1/session")
+                        log.info(f"[owned-skins] *** SKINS *** {list(self.owned_skins)[:10]}...")  # Afficher les 10 premiers
+                    else:
+                        log.debug(f"[owned-skins] no unlockedSkinIds found in session")
+                else:
+                    # Endpoint 2: /lol-inventory/v1/inventory (inventaire complet)
+                    owned_data = lcu.get("/lol-inventory/v1/inventory")
+                    log.info(f"[owned-skins] /lol-inventory/v1/inventory response: {owned_data}")
+                    if owned_data and isinstance(owned_data, list):
+                        # Extraire les skin IDs de l'inventaire
+                        skin_ids = []
+                        for item in owned_data:
+                            if isinstance(item, dict):
+                                item_type = item.get('type', '')
+                                item_id = item.get('itemId')
+                                if item_type == 'CHAMPION_SKIN' and item_id:
+                                    skin_ids.append(int(item_id))
+                                elif 'skin' in item_type.lower() and item_id:
+                                    skin_ids.append(int(item_id))
+                        if skin_ids:
+                            self.owned_skins = set(skin_ids)
+                            self.owned_skins_last_check = now
+                            log.info(f"[owned-skins] cached {len(self.owned_skins)} skins from /lol-inventory/v1/inventory")
+                        else:
+                            log.debug(f"[owned-skins] no skin items found in inventory")
+                    else:
+                        # Endpoint 3: /lol-champions/v1/owned-champions-minimal
+                        owned_data = lcu.get("/lol-champions/v1/owned-champions-minimal")
+                        log.info(f"[owned-skins] /lol-champions/v1/owned-champions-minimal response: {owned_data}")
+                        if owned_data and isinstance(owned_data, list):
+                            # Pour les champions débloqués, on considère que le skin de base (skinId=0) est possédé
+                            # On ne peut pas récupérer les skins spécifiques avec cet endpoint
+                            log.debug(f"[owned-skins] found {len(owned_data)} owned champions, but no skin info")
+                        else:
+                            # Endpoint 4: Essayer de lister tous les endpoints disponibles
+                            log.debug(f"[owned-skins] trying to discover available endpoints...")
+                            test_endpoints = [
+                                "/lol-champ-select/v1/session",
+                                "/lol-inventory/v1/inventory",
+                                "/lol-champions/v1/owned-champions-minimal", 
+                                "/lol-summoner/v1/current-summoner",
+                                "/lol-summoner/v1/summoners/me"
+                            ]
+                            for endpoint in test_endpoints:
+                                test_data = lcu.get(endpoint)
+                                log.debug(f"[owned-skins] {endpoint}: {test_data is not None}")
+                            
+                            log.debug(f"[owned-skins] no valid data from any endpoint, keeping existing cache")
+                            
+            except Exception as e:
+                log.debug(f"[owned-skins] failed to fetch: {e}")
+        
+        is_owned = skin_id in self.owned_skins
+        log.debug(f"[owned-skins] skinId={skin_id} -> {is_owned} (cache size: {len(self.owned_skins)})")
+        return is_owned
 
 # ====================== Threads (polling) ======================
 class PhaseThread(threading.Thread):
@@ -619,6 +731,7 @@ class LoadoutTicker(threading.Thread):
         self.ticker_id = int(ticker_id)
         self.mode = mode
         self.db = db
+
 
     def run(self):
         # Sort immédiatement si un autre ticker a pris la main
@@ -726,111 +839,133 @@ class LoadoutTicker(threading.Thread):
                             f.write(str(self.state.last_hovered_skin_key or name).strip())
                         self.state.last_hover_written = True
                         log.info(f"[loadout #{self.ticker_id}] wrote {path}: {name}")
-                        # Lancer le batch d'injection (facultatif)
-                        try:
-                            batch = (getattr(self.state, 'inject_batch', None) or '').strip()
-                            # Normaliser le répertoire cible du .txt
-                            basedir = os.path.abspath(os.path.dirname(path))
-                            # Si on a reçu un dossier, tenter des noms connus dedans
-                            candidates = []
-                            if batch:
-                                if os.path.isdir(batch):
-                                    root = os.path.abspath(batch)
-                                    candidates.extend([
-                                os.path.join(root, n) for n in ['run_cslol_tools.bat', 'run_cslol_tools.cmd',
-                                    'fast_inject.bat', 'fast_inject.cmd',
-                                    'inject_skin.bat', 'inject_last_hovered_skin.bat', 'inject_last_hovered.bat',
-                                    'run_injector.bat', 'run_cslol_tools.bat', 'run_cslol_tools.cmd', 'inject.bat']
-                            ])
-                                else:
-                                    candidates.append(os.path.abspath(batch))
-                            # Toujours tenter à côté du fichier écrit
-                            candidates.extend([
-                                os.path.join(basedir, n) for n in [
-                                    'fast_inject.bat', 'fast_inject.cmd',
-                                    'inject_skin.bat', 'inject_last_hovered_skin.bat', 'inject_last_hovered.bat',
-                                    'run_injector.bat', 'run_cslol_tools.bat', 'run_cslol_tools.cmd', 'inject.bat']
-                            ])
-                            # Dédupliquer en préservant l'ordre
-                            seen = set(); ordered = []
-                            for c in candidates:
-                                c2 = os.path.normpath(c)
-                                if c2 not in seen:
-                                    seen.add(c2); ordered.append(c2)
-                            chosen = None
-                            for c in ordered:
-                                if os.path.isfile(c):
-                                    chosen = c; break
-                            if chosen:
-                                # Try to resolve the target ZIP in incoming_zips/<Champion>/ matching the hovered skin name
-                                try:
-                                    import sys, re as _re, difflib
-                                    base_dir = os.path.dirname(getattr(self.state, 'skin_file', '') or '.')
-                                    incoming = os.path.join(base_dir, 'incoming_zips')
-                                    skin_name = (self.state.last_hovered_skin_key or '').strip()
-                                    champ_name = None
-                                    champ_slug = getattr(self.state, 'last_hovered_skin_slug', None) or None
-                                    cid = getattr(self.state, 'locked_champ_id', None)
-                                    if getattr(self, 'db', None):
-                                        try:
-                                            champ_name = self.db.champ_name_by_id.get(cid) if cid else None
-                                        except Exception:
-                                            champ_name = None
-                                    cand_dirs = []
-                                    # Prefer per-champion directory (display name), then slug, finally flat root
-                                    if champ_name: cand_dirs.append(os.path.join(incoming, str(champ_name)))
-                                    if champ_slug: cand_dirs.append(os.path.join(incoming, str(champ_slug)))
-                                    cand_dirs.append(incoming)
-                                    def _norm(s):
-                                        return _re.sub(r'[^a-z0-9]+',' ', (s or '').lower()).strip()
-                                    target = _norm(skin_name)
-                                    best_path, best_score = None, -1.0
-                                    for d in cand_dirs:
-                                        try:
-                                            for fn in os.listdir(d):
-                                                if not fn.lower().endswith('.zip'):
-                                                    continue
-                                                name_no_ext = os.path.splitext(fn)[0]
-                                                score = difflib.SequenceMatcher(None, _norm(name_no_ext), target).ratio()
-                                                if target and target in _norm(name_no_ext):
-                                                    score += 0.15
-                                                if score > best_score:
-                                                    best_score = score
-                                                    best_path = os.path.join(d, fn)
-                                        except Exception:
-                                            pass
-                                    if best_path and os.path.isfile(best_path):
-                                        # Call injector directly to ensure new folder structure works
-                                        cmd = [sys.executable, '-u', 'cslol_tools_injector.py', '--timeout', '36000', '--zip', best_path]
-                                        import subprocess, threading
-                                        proc = subprocess.Popen(cmd, cwd=base_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-                                        def _relay():
-                                            try:
-                                                for line in iter(proc.stdout.readline, ''):
-                                                    if not line: break
-                                                    log.info(line.rstrip())
-                                            except Exception:
-                                                pass
-                                        threading.Thread(target=_relay, daemon=True).start()
-                                        log.info(f"[inject] injector (zip) → {best_path}")
+                        # Lancer le batch d'injection (facultatif) - sauter pour les skins de base et débloqués
+                        if self.state.last_hovered_skin_id == 0:
+                            log.info(f"[inject] skipping base skin injection (skinId=0)")
+                        elif not LoadoutTicker.args.disable_owned_check and self.state.is_skin_owned(self.state.last_hovered_skin_id, self.lcu):
+                            log.info(f"[inject] skipping owned skin injection (skinId={self.state.last_hovered_skin_id})")
+                        else:
+                            try:
+                                batch = (getattr(self.state, 'inject_batch', None) or '').strip()
+                                # Normaliser le répertoire cible du .txt
+                                basedir = os.path.abspath(os.path.dirname(path))
+                                # Si on a reçu un dossier, tenter des noms connus dedans
+                                candidates = []
+                                if batch:
+                                    if os.path.isdir(batch):
+                                        root = os.path.abspath(batch)
+                                        candidates.extend([
+                                            os.path.join(root, n) for n in ['run_cslol_tools.bat', 'run_cslol_tools.cmd',
+                                                'fast_inject.bat', 'fast_inject.cmd',
+                                                'inject_skin.bat', 'inject_last_hovered_skin.bat', 'inject_last_hovered.bat',
+                                                'run_injector.bat', 'run_cslol_tools.bat', 'run_cslol_tools.cmd', 'inject.bat']
+                                        ])
                                     else:
-                                        # Fallback to existing batch discovery
-                                        creationflags = 0
-                                        proc = subprocess.Popen(['cmd.exe','/c', chosen], cwd=os.path.dirname(chosen) or None, shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-                                        def _relay_cslol_logs():
+                                        candidates.append(os.path.abspath(batch))
+                                # Toujours tenter à côté du fichier écrit
+                                candidates.extend([
+                                    os.path.join(basedir, n) for n in [
+                                        'fast_inject.bat', 'fast_inject.cmd',
+                                        'inject_skin.bat', 'inject_last_hovered_skin.bat', 'inject_last_hovered.bat',
+                                        'run_injector.bat', 'run_cslol_tools.bat', 'run_cslol_tools.cmd', 'inject.bat']
+                                ])
+                                # Dédupliquer en préservant l'ordre
+                                seen = set(); ordered = []
+                                for c in candidates:
+                                    c2 = os.path.normpath(c)
+                                    if c2 not in seen:
+                                        seen.add(c2); ordered.append(c2)
+                                chosen = None
+                                for c in ordered:
+                                    if os.path.isfile(c):
+                                        chosen = c; break
+                                if chosen:
+                                    # Utiliser la nouvelle fonction de matching OCR/Database pour trouver le ZIP
+                                    try:
+                                        import sys, subprocess, threading
+                                        base_dir = os.path.dirname(getattr(self.state, 'skin_file', '') or '.')
+                                        incoming = os.path.join(base_dir, 'incoming_zips')
+                                        skin_name = (self.state.last_hovered_skin_key or '').strip()
+                                        champ_name = None
+                                        champ_slug = getattr(self.state, 'last_hovered_skin_slug', None) or None
+                                        cid = getattr(self.state, 'locked_champ_id', None)
+                                        
+                                        if getattr(self, 'db', None) and cid:
                                             try:
-                                                for line in iter(proc.stdout.readline, ''):
-                                                    if not line: break
-                                                    log.info(line.rstrip())
+                                                champ_name = self.db.champ_name_by_id.get(cid)
                                             except Exception:
-                                                pass
-                                        threading.Thread(target=_relay_cslol_logs, daemon=True).start()
-                                        log.info(f"[inject] streaming logs from {chosen} (fallback)")
-                                except Exception as ie:
-                                    log.warning(f"[inject] failed: {ie}")
-                                log.warning(f"[inject] batch not found. tried={ordered}")
-                        except Exception as ie:
-                            log.warning(f"[inject] failed: {ie}")
+                                                champ_name = None
+                                        
+                                        # Rechercher dans les dossiers par ordre de priorité
+                                        cand_dirs = []
+                                        if champ_name: 
+                                            cand_dirs.append(os.path.join(incoming, str(champ_name)))
+                                        if champ_slug: 
+                                            cand_dirs.append(os.path.join(incoming, str(champ_slug)))
+                                        cand_dirs.append(incoming)  # Dossier racine en dernier recours
+                                        
+                                        best_path, best_score = None, 0.0
+                                        target_norm = _norm(skin_name)
+                                        
+                                        for d in cand_dirs:
+                                            try:
+                                                if not os.path.isdir(d):
+                                                    continue
+                                                for fn in os.listdir(d):
+                                                    if not fn.lower().endswith('.zip'):
+                                                        continue
+                                                    name_no_ext = os.path.splitext(fn)[0]
+                                                    score = _levenshtein_score(target_norm, _norm(name_no_ext))
+                                                    
+                                                    # Bonus si le nom du skin est contenu dans le nom du fichier
+                                                    if target_norm and target_norm in _norm(name_no_ext):
+                                                        score += 0.1
+                                                    
+                                                    if score > best_score:
+                                                        best_score = score
+                                                        best_path = os.path.join(d, fn)
+                                            except Exception:
+                                                continue
+                                        
+                                        # Seuil de confiance pour accepter le match
+                                        min_confidence = 0.6
+                                        if best_path and best_score >= min_confidence:
+                                            # Utiliser l'injector Python directement
+                                            cmd = [sys.executable, '-u', 'cslol_tools_injector.py', '--timeout', '36000', '--zip', best_path]
+                                            proc = subprocess.Popen(cmd, cwd=base_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                                            
+                                            def _relay():
+                                                try:
+                                                    for line in iter(proc.stdout.readline, ''):
+                                                        if not line: break
+                                                        log.info(line.rstrip())
+                                                except Exception:
+                                                    pass
+                                            
+                                            threading.Thread(target=_relay, daemon=True).start()
+                                            log.info(f"[inject] found match (score: {best_score:.3f}) → {best_path}")
+                                        else:
+                                            # Fallback vers le batch existant si aucun match trouvé
+                                            if chosen and os.path.isfile(chosen):
+                                                proc = subprocess.Popen(['cmd.exe','/c', chosen], cwd=os.path.dirname(chosen) or None, shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                                                
+                                                def _relay_cslol_logs():
+                                                    try:
+                                                        for line in iter(proc.stdout.readline, ''):
+                                                            if not line: break
+                                                            log.info(line.rstrip())
+                                                    except Exception:
+                                                        pass
+                                                
+                                                threading.Thread(target=_relay_cslol_logs, daemon=True).start()
+                                                log.info(f"[inject] fallback to batch → {chosen}")
+                                            else:
+                                                log.warning(f"[inject] no suitable ZIP found (best score: {best_score:.3f}) and no batch available")
+                                                
+                                    except Exception as ie:
+                                        log.warning(f"[inject] failed: {ie}")
+                            except Exception as ie:
+                                log.warning(f"[inject] failed: {ie}")
                     except Exception as e:
                         log.warning(f"[loadout #{self.ticker_id}] write failed: {e}")
 
@@ -1033,9 +1168,9 @@ class WSEventThread(threading.Thread):
 
 # --------- OCR thread : ROI verrouillée + burst ---------
 class OCRSkinThread(threading.Thread):
-    def __init__(self, state: SharedState, db: NameDB, ocr: OCR, args):
+    def __init__(self, state: SharedState, db: NameDB, ocr: OCR, args, lcu: Optional['LCU'] = None):
         super().__init__(daemon=True)
-        self.state=state; self.db=db; self.ocr=ocr; self.args=args
+        self.state=state; self.db=db; self.ocr=ocr; self.args=args; self.lcu=lcu
         self.monitor_index = 0 if args.monitor=="all" else 1
         self.diff_threshold = args.diff_threshold
         self.burst_ms = args.burst_ms
@@ -1144,25 +1279,31 @@ class OCRSkinThread(threading.Thread):
         champ_id = self.state.hovered_champ_id or self.state.locked_champ_id
         pairs = self.db.normalized_entries(champ_id) or []
         skin_pairs = [(e, nk) for (e, nk) in pairs if e.kind == "skin"]
+        champ_pairs = [(e, nk) for (e, nk) in pairs if e.kind == "champion"]
+        
+        # Combiner skins et champions pour la recherche
+        all_pairs = skin_pairs + champ_pairs
         entries = None; labels = None
-        if champ_id and skin_pairs:
-            entries, labels = zip(*skin_pairs)
+        if champ_id and all_pairs:
+            entries, labels = zip(*all_pairs)
         else:
-            if not skin_pairs and champ_id:
+            if not all_pairs and champ_id:
                 slug = self.db.slug_by_id.get(champ_id)
                 if slug:
                     self.db._ensure_champ(slug, champ_id)
                     pairs = self.db.normalized_entries(champ_id) or []
                     skin_pairs = [(e, nk) for (e, nk) in pairs if e.kind == "skin"]
-                    if skin_pairs:
-                        entries, labels = zip(*skin_pairs)
+                    champ_pairs = [(e, nk) for (e, nk) in pairs if e.kind == "champion"]
+                    all_pairs = skin_pairs + champ_pairs
+                    if all_pairs:
+                        entries, labels = zip(*all_pairs)
         if not entries: return
         # Utiliser notre système de score basé sur la distance de Levenshtein
         best_score = 0.0
         best_idx = None
         best_entry = None
         
-        for i, (entry, label) in enumerate(skin_pairs):
+        for i, (entry, label) in enumerate(all_pairs):
             score = _levenshtein_score(norm_txt, label)
             if score > best_score:
                 best_score = score
@@ -1177,30 +1318,45 @@ class OCRSkinThread(threading.Thread):
         score = best_score
         entry = best_entry
         log.debug(f"[debug] Match found: '{norm_txt}' -> '{labels[idx]}' (levenshtein score: {score:.3f})")
-        # Filtrage simple : ignorer si le texte OCR ne contient que le nom du champion
-        try:
+        # Vérifier que le match est valide
+        if score < self.args.min_conf:
+            return
+        
+        # Si c'est un champion (skin de base), vérifier que c'est une correspondance exacte
+        if entry.kind == "champion":
             champ_nm = self.db.champ_name_by_id.get(champ_id or -1, "")
             if champ_nm:
                 champ_tokens = set(_norm(champ_nm).split())
                 txt_tokens = set(norm_txt.split())
-                if champ_tokens and txt_tokens.issubset(champ_tokens):
-                    log.debug(f"[debug] Ignoring pure champion name OCR: '{norm_txt}'")
+                # Pour les skins de base, on veut une correspondance exacte
+                if not (champ_tokens == txt_tokens or 
+                       (champ_tokens and txt_tokens.issubset(champ_tokens) and len(norm_txt.split()) == len(champ_tokens))):
+                    log.debug(f"[debug] Champion match not exact enough: '{norm_txt}' vs '{champ_nm}'")
                     return
-        except Exception:
-            pass
-        if entry.kind != "skin" or score < self.args.min_conf:
+        elif entry.kind != "skin":
             return
         if entry.key != self.last_key:
-            # Prefer the plain skin display name from DB (e.g., "T1 Yone" not "Yone T1 Yone")
-            disp = self.db.skin_name_by_id.get(entry.skin_id) or entry.key
-            log.info(f"[hover:skin] {disp} (skinId={entry.skin_id}, champ={entry.champ_slug})")
-            self.state.last_hovered_skin_key  = disp
-            self.state.last_hovered_skin_id   = entry.skin_id
-            self.state.last_hovered_skin_slug = entry.champ_slug
+            if entry.kind == "champion":
+                # Pour les skins de base, utiliser le nom du champion
+                champ_name = self.db.champ_name_by_id.get(entry.champ_id, entry.key)
+                log.info(f"[hover:skin] {champ_name} (skinId=0, champ={entry.champ_slug}, score={score:.3f})")
+                self.state.last_hovered_skin_key  = champ_name
+                self.state.last_hovered_skin_id   = 0  # 0 = skin de base
+                self.state.last_hovered_skin_slug = entry.champ_slug
+            else:
+                # Pour les skins normaux, utiliser le nom du skin
+                disp = self.db.skin_name_by_id.get(entry.skin_id) or entry.key
+                # Vérifier si le skin est débloqué
+                owned_status = "owned" if not self.args.disable_owned_check and self.state.is_skin_owned(entry.skin_id, self.lcu) else "not-owned"
+                log.info(f"[hover:skin] {disp} (skinId={entry.skin_id}, champ={entry.champ_slug}, score={score:.3f}, {owned_status})")
+                self.state.last_hovered_skin_key  = disp
+                self.state.last_hovered_skin_id   = entry.skin_id
+                self.state.last_hovered_skin_slug = entry.champ_slug
             self.last_key = entry.key
 
 # ====================== Main ======================
 def main():
+    print("*** NEW VERSION LOADED *** - Testing owned skins detection")
     ap=argparse.ArgumentParser(description="Tracer combiné LCU + OCR (ChampSelect) — ROI lock + burst OCR + locks/timer fixes")
     ap.add_argument("--tessdata", type=str, default=None, help="Chemin du dossier tessdata (ex: C:\\Program Files\\Tesseract-OCR\\tessdata)")
     ap.add_argument("--capture", choices=["window","screen"], default="window")
@@ -1228,6 +1384,7 @@ def main():
     ap.add_argument("--fallback-loadout-ms", type=int, default=0, help="(déprécié) Ancien fallback ms si LCU ne donne pas le timer — ignoré")
     ap.add_argument("--skin-threshold-ms", type=int, default=2000, help="Écrire le dernier skin à T<=seuil (ms)")
     ap.add_argument("--skin-file", type=str, default=r"C:\Users\alban\Desktop\Skin changer\skin injector\last_hovered_skin.txt", help="Chemin du fichier last_hovered_skin.txt")
+    ap.add_argument("--disable-owned-check", action="store_true", help="Désactiver la vérification des skins débloqués")
     ap.add_argument("--inject-batch", type=str, default=r"C:\Users\alban\Desktop\Skin changer\skin injector\inject_skin.bat", help="Batch à exécuter juste après l'écriture du skin (laisser vide pour désactiver)")
 
     args=ap.parse_args()
@@ -1247,7 +1404,9 @@ def main():
 
     t_phase = PhaseThread(lcu, state, interval=1.0/max(0.5, args.phase_hz), log_transitions=not args.ws)
     t_champ = None if args.ws else ChampThread(lcu, db, state, interval=0.25)
-    t_ocr   = OCRSkinThread(state, db, ocr, args)
+    t_ocr   = OCRSkinThread(state, db, ocr, args, lcu)
+    # Passer args à LoadoutTicker pour accéder à disable_owned_check
+    LoadoutTicker.args = args
     t_ws    = WSEventThread(lcu, db, state, ping_interval=args.ws_ping, timer_hz=args.timer_hz, fallback_ms=args.fallback_loadout_ms) if args.ws else None
 
     t_phase.start()
