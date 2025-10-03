@@ -21,13 +21,11 @@ import argparse
 import os, sys, time, json, logging, threading
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, List, Dict, Any
-import subprocess
 
 import numpy as np
 import cv2
 import psutil
 import requests
-from rapidfuzz import process as rf_process, fuzz as rf_fuzz
 from rapidfuzz.distance import Levenshtein
 import unicodedata, re
 import ssl, base64
@@ -101,42 +99,24 @@ class OCR:
         self.psm = int(psm)
         self.backend = None
         self.api = None
-        try:
-            import tesserocr
-            from tesserocr import PyTessBaseAPI, PSM
-            tessdata_dir = getattr(self, "tessdata_dir", None) or os.environ.get("TESSDATA_PREFIX")
-            if tessdata_dir and not tessdata_dir.lower().endswith("tessdata"):
-                cand = os.path.join(tessdata_dir, "tessdata")
-                if os.path.isdir(cand):
-                    tessdata_dir = cand
-            psm_mode = PSM.SINGLE_LINE if self.psm == 7 else PSM.AUTO
-            if tessdata_dir and os.path.isdir(tessdata_dir):
-                self.api = PyTessBaseAPI(path=tessdata_dir, lang=self.lang, psm=psm_mode)
-            else:
-                self.api = PyTessBaseAPI(lang=self.lang, psm=psm_mode)
-            self.api.SetVariable("preserve_interword_spaces", "1")
-            self.api.SetVariable("user_defined_dpi", "240")
-            self.api.SetVariable("tessedit_char_whitelist",
-                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-                "ÀÂÄÃÇÉÈÊËÎÏÌÍÔÖÒÓÙÛÜÚàâäãçéèêëîïìíôöòóùûüúÑñ"
-                "0123456789 .-':")
-            self.backend = "tesserocr"
-        except Exception as e:
-            log.warning(f"tesserocr indisponible, fallback pytesseract: {e}")
-            import pytesseract
-            if tesseract_exe:
-                if os.path.isdir(tesseract_exe):
-                    for c in (
-                        os.path.join(tesseract_exe, "tesseract.exe"),
-                        os.path.join(tesseract_exe, "..", "tesseract.exe"),
-                        os.path.join(tesseract_exe, "bin", "tesseract.exe"),
-                    ):
-                        if os.path.isfile(c):
-                            tesseract_exe = os.path.abspath(c); break
-                if os.path.isfile(tesseract_exe):
-                    pytesseract.pytesseract.tesseract_cmd = tesseract_exe
-            self.pytesseract = pytesseract
-            self.backend = "pytesseract"
+        from tesserocr import PyTessBaseAPI, PSM
+        tessdata_dir = getattr(self, "tessdata_dir", None) or os.environ.get("TESSDATA_PREFIX")
+        if tessdata_dir and not tessdata_dir.lower().endswith("tessdata"):
+            cand = os.path.join(tessdata_dir, "tessdata")
+            if os.path.isdir(cand):
+                tessdata_dir = cand
+        psm_mode = PSM.SINGLE_LINE if self.psm == 7 else PSM.AUTO
+        if tessdata_dir and os.path.isdir(tessdata_dir):
+            self.api = PyTessBaseAPI(path=tessdata_dir, lang=self.lang, psm=psm_mode)
+        else:
+            self.api = PyTessBaseAPI(lang=self.lang, psm=psm_mode)
+        self.api.SetVariable("preserve_interword_spaces", "1")
+        self.api.SetVariable("user_defined_dpi", "240")
+        self.api.SetVariable("tessedit_char_whitelist",
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+            "ÀÂÄÃÇÉÈÊËÎÏÌÍÔÖÒÓÙÛÜÚàâäãçéèêëîïìíôöòóùûüúÑñ"
+            "0123456789 .-':")
+        self.backend = "tesserocr"
 
     def recognize(self, img: np.ndarray) -> str:
         if self.backend == "tesserocr":
