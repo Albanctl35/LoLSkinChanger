@@ -1,13 +1,10 @@
-# Minimal deps for all_in_one_tracer.py
 numpy
 opencv-python
-Pillow
-mss
 psutil
 requests
+rapidfuzz
+mss
 urllib3
 websocket-client
-rapidfuzz
-# OCR backends
-tesserocr==2.8.0
-pytesseract
+Pillow
+.\tesserocr-2.8.0-cp311-cp311-win_amd64.whl
