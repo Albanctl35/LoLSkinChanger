@@ -3,14 +3,14 @@
 """
 all_in_one_tracer.py — FULL (patched)
 -------------------------------------
-Corrections intégrées dans le gros fichier :
+Corrections intégrées dans le gros fichier :
   ✓ Compteur de locks fiable (diff sur cellId → +1 / -1, ALL LOCKED x/y)
   ✓ Timer de loadout haute fréquence (par défaut 1000 Hz) + resync LCU
   ✓ Démarrage du compte à rebours en FINALIZATION ou quand tout le monde est lock
   ✓ Fallback si le LCU ne renvoie pas le timer (10 s solo, 30 s lobby complet ou --fallback-loadout-ms)
 
-Notes :
-- Les logs ressemblent à : [players] …, [locks] +1 …, [locks] ALL LOCKED …, [loadout] T-…
+Notes :
+- Les logs ressemblent à : [players] …, [locks] +1 …, [locks] ALL LOCKED …, [loadout] T-…
 - OCR inchangé sauf qu'il attend ton lock pour spammer moins.
 
 Basé sur ton fichier original 1000+ lignes (OCR/WS/LCU/DataDragon conservés).
@@ -32,7 +32,7 @@ import ssl, base64
 
 # --- WebSocket (optionnel) ---
 try:
-    import websocket  # websocket-client
+    import websocket  # websocket-client  # pyright: ignore[reportMissingImports]
 except Exception:
     websocket = None
 
@@ -99,7 +99,7 @@ class OCR:
         self.psm = int(psm)
         self.backend = None
         self.api = None
-        from tesserocr import PyTessBaseAPI, PSM
+        from tesserocr import PyTessBaseAPI, PSM  # pyright: ignore[reportMissingImports]
         tessdata_dir = getattr(self, "tessdata_dir", None) or os.environ.get("TESSDATA_PREFIX")
         if tessdata_dir and not tessdata_dir.lower().endswith("tessdata"):
             cand = os.path.join(tessdata_dir, "tessdata")
@@ -1074,7 +1074,7 @@ class OCRSkinThread(threading.Thread):
 
     def _calc_band_roi_abs(self, sct, monitor) -> Optional[Tuple[int,int,int,int]]:
         try:
-            import mss
+            import mss  # pyright: ignore[reportMissingImports]
             if self.args.capture=="window" and is_windows():
                 rect = find_league_window_rect(self.args.window_hint)
                 if not rect: return None
@@ -1092,7 +1092,7 @@ class OCRSkinThread(threading.Thread):
             return None
 
     def run(self):
-        import mss
+        import mss  # pyright: ignore[reportMissingImports]
         log.info("[ocr] thread prêt (actif uniquement en ChampSelect).")
         try:
             with mss.mss() as sct:
