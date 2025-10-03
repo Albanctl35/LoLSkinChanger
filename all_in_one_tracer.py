@@ -537,94 +537,6 @@ class SharedState:
     timer_lock: threading.Lock = field(default_factory=threading.Lock)
     ticker_seq: int = 0
     current_ticker: int = 0
-    # Owned skins cache
-    owned_skins: set = field(default_factory=set)
-    owned_skins_last_check: float = 0.0
-    
-    def is_skin_owned(self, skin_id: int, lcu: Optional['LCU'] = None) -> bool:
-        """Vérifie si un skin est déjà débloqué par le joueur"""
-        print(f"*** CHECKING SKIN OWNERSHIP *** skinId={skin_id}")
-        if skin_id <= 0 or not lcu:
-            return False
-        
-        # Si le cache est vide depuis plus de 60 secondes, désactiver la vérification
-        now = time.time()
-        if len(self.owned_skins) == 0 and (now - self.owned_skins_last_check) > 60.0:
-            log.debug(f"[owned-skins] API unavailable, assuming all skins are not-owned")
-            return False
-        
-        # Mettre à jour le cache des skins débloqués toutes les 30 secondes
-        if now - self.owned_skins_last_check > 30.0:
-            try:
-                # Essayer plusieurs endpoints LCU pour les skins débloqués
-                owned_data = None
-                
-                # Endpoint 1: /lol-champ-select/v1/session (unlockedSkinIds)
-                log.info(f"[owned-skins] *** TESTING NEW ENDPOINT *** /lol-champ-select/v1/session")
-                session_data = lcu.get("/lol-champ-select/v1/session")
-                log.info(f"[owned-skins] /lol-champ-select/v1/session response: {session_data}")
-                if session_data and isinstance(session_data, dict):
-                    # Chercher entitledFeatureState.unlockedSkinIds
-                    entitled_state = session_data.get('entitledFeatureState', {})
-                    unlocked_skin_ids = entitled_state.get('unlockedSkinIds', [])
-                    if unlocked_skin_ids and isinstance(unlocked_skin_ids, list):
-                        self.owned_skins = set(unlocked_skin_ids)
-                        self.owned_skins_last_check = now
-                        log.info(f"[owned-skins] *** SUCCESS *** cached {len(self.owned_skins)} skins from /lol-champ-select/v1/session")
-                        log.info(f"[owned-skins] *** SKINS *** {list(self.owned_skins)[:10]}...")  # Afficher les 10 premiers
-                    else:
-                        log.debug(f"[owned-skins] no unlockedSkinIds found in session")
-                else:
-                    # Endpoint 2: /lol-inventory/v1/inventory (inventaire complet)
-                    owned_data = lcu.get("/lol-inventory/v1/inventory")
-                    log.info(f"[owned-skins] /lol-inventory/v1/inventory response: {owned_data}")
-                    if owned_data and isinstance(owned_data, list):
-                        # Extraire les skin IDs de l'inventaire
-                        skin_ids = []
-                        for item in owned_data:
-                            if isinstance(item, dict):
-                                item_type = item.get('type', '')
-                                item_id = item.get('itemId')
-                                if item_type == 'CHAMPION_SKIN' and item_id:
-                                    skin_ids.append(int(item_id))
-                                elif 'skin' in item_type.lower() and item_id:
-                                    skin_ids.append(int(item_id))
-                        if skin_ids:
-                            self.owned_skins = set(skin_ids)
-                            self.owned_skins_last_check = now
-                            log.info(f"[owned-skins] cached {len(self.owned_skins)} skins from /lol-inventory/v1/inventory")
-                        else:
-                            log.debug(f"[owned-skins] no skin items found in inventory")
-                    else:
-                        # Endpoint 3: /lol-champions/v1/owned-champions-minimal
-                        owned_data = lcu.get("/lol-champions/v1/owned-champions-minimal")
-                        log.info(f"[owned-skins] /lol-champions/v1/owned-champions-minimal response: {owned_data}")
-                        if owned_data and isinstance(owned_data, list):
-                            # Pour les champions débloqués, on considère que le skin de base (skinId=0) est possédé
-                            # On ne peut pas récupérer les skins spécifiques avec cet endpoint
-                            log.debug(f"[owned-skins] found {len(owned_data)} owned champions, but no skin info")
-                        else:
-                            # Endpoint 4: Essayer de lister tous les endpoints disponibles
-                            log.debug(f"[owned-skins] trying to discover available endpoints...")
-                            test_endpoints = [
-                                "/lol-champ-select/v1/session",
-                                "/lol-inventory/v1/inventory",
-                                "/lol-champions/v1/owned-champions-minimal", 
-                                "/lol-summoner/v1/current-summoner",
-                                "/lol-summoner/v1/summoners/me"
-                            ]
-                            for endpoint in test_endpoints:
-                                test_data = lcu.get(endpoint)
-                                log.debug(f"[owned-skins] {endpoint}: {test_data is not None}")
-                            
-                            log.debug(f"[owned-skins] no valid data from any endpoint, keeping existing cache")
-                            
-            except Exception as e:
-                log.debug(f"[owned-skins] failed to fetch: {e}")
-        
-        is_owned = skin_id in self.owned_skins
-        log.debug(f"[owned-skins] skinId={skin_id} -> {is_owned} (cache size: {len(self.owned_skins)})")
-        return is_owned
 
 # ====================== Threads (polling) ======================
 class PhaseThread(threading.Thread):
@@ -819,11 +731,9 @@ class LoadoutTicker(threading.Thread):
                             f.write(str(self.state.last_hovered_skin_key or name).strip())
                         self.state.last_hover_written = True
                         log.info(f"[loadout #{self.ticker_id}] wrote {path}: {name}")
-                        # Lancer le batch d'injection (facultatif) - sauter pour les skins de base et débloqués
+                        # Lancer le batch d'injection (facultatif) - sauter pour les skins de base
                         if self.state.last_hovered_skin_id == 0:
                             log.info(f"[inject] skipping base skin injection (skinId=0)")
-                        elif not LoadoutTicker.args.disable_owned_check and self.state.is_skin_owned(self.state.last_hovered_skin_id, self.lcu):
-                            log.info(f"[inject] skipping owned skin injection (skinId={self.state.last_hovered_skin_id})")
                         else:
                             try:
                                 batch = (getattr(self.state, 'inject_batch', None) or '').strip()
@@ -1326,9 +1236,7 @@ class OCRSkinThread(threading.Thread):
             else:
                 # Pour les skins normaux, utiliser le nom du skin
                 disp = self.db.skin_name_by_id.get(entry.skin_id) or entry.key
-                # Vérifier si le skin est débloqué
-                owned_status = "owned" if not self.args.disable_owned_check and self.state.is_skin_owned(entry.skin_id, self.lcu) else "not-owned"
-                log.info(f"[hover:skin] {disp} (skinId={entry.skin_id}, champ={entry.champ_slug}, score={score:.3f}, {owned_status})")
+                log.info(f"[hover:skin] {disp} (skinId={entry.skin_id}, champ={entry.champ_slug}, score={score:.3f})")
                 self.state.last_hovered_skin_key  = disp
                 self.state.last_hovered_skin_id   = entry.skin_id
                 self.state.last_hovered_skin_slug = entry.champ_slug
@@ -1336,7 +1244,7 @@ class OCRSkinThread(threading.Thread):
 
 # ====================== Main ======================
 def main():
-    print("*** NEW VERSION LOADED *** - Testing owned skins detection")
+    print("*** NEW VERSION LOADED *** - Skin ownership detection removed")
     ap=argparse.ArgumentParser(description="Tracer combiné LCU + OCR (ChampSelect) — ROI lock + burst OCR + locks/timer fixes")
     ap.add_argument("--tessdata", type=str, default=None, help="Chemin du dossier tessdata (ex: C:\\Program Files\\Tesseract-OCR\\tessdata)")
     ap.add_argument("--capture", choices=["window","screen"], default="window")
@@ -1364,7 +1272,6 @@ def main():
     ap.add_argument("--fallback-loadout-ms", type=int, default=0, help="(déprécié) Ancien fallback ms si LCU ne donne pas le timer — ignoré")
     ap.add_argument("--skin-threshold-ms", type=int, default=2000, help="Écrire le dernier skin à T<=seuil (ms)")
     ap.add_argument("--skin-file", type=str, default=r"C:\Users\alban\Desktop\Skin changer\skin injector\last_hovered_skin.txt", help="Chemin du fichier last_hovered_skin.txt")
-    ap.add_argument("--disable-owned-check", action="store_true", help="Désactiver la vérification des skins débloqués")
     ap.add_argument("--inject-batch", type=str, default=r"C:\Users\alban\Desktop\Skin changer\skin injector\inject_skin.bat", help="Batch à exécuter juste après l'écriture du skin (laisser vide pour désactiver)")
 
     args=ap.parse_args()
@@ -1385,7 +1292,7 @@ def main():
     t_phase = PhaseThread(lcu, state, interval=1.0/max(0.5, args.phase_hz), log_transitions=not args.ws)
     t_champ = None if args.ws else ChampThread(lcu, db, state, interval=0.25)
     t_ocr   = OCRSkinThread(state, db, ocr, args, lcu)
-    # Passer args à LoadoutTicker pour accéder à disable_owned_check
+    # Passer args à LoadoutTicker
     LoadoutTicker.args = args
     t_ws    = WSEventThread(lcu, db, state, ping_interval=args.ws_ping, timer_hz=args.timer_hz, fallback_ms=args.fallback_loadout_ms) if args.ws else None
 
