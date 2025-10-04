@@ -61,8 +61,8 @@ def main():
     ap.add_argument("--timer-hz", type=int, default=1000, help="Fréquence d'affichage du décompte loadout (Hz)")
     ap.add_argument("--fallback-loadout-ms", type=int, default=0, help="(déprécié) Ancien fallback ms si LCU ne donne pas le timer — ignoré")
     ap.add_argument("--skin-threshold-ms", type=int, default=2000, help="Écrire le dernier skin à T<=seuil (ms)")
-    ap.add_argument("--skin-file", type=str, default=r"C:\Users\alban\Desktop\Skin changer\skin injector\last_hovered_skin.txt", help="Chemin du fichier last_hovered_skin.txt")
-    ap.add_argument("--inject-batch", type=str, default=r"C:\Users\alban\Desktop\Skin changer\skin injector\inject_skin.bat", help="Batch à exécuter juste après l'écriture du skin (laisser vide pour désactiver)")
+    ap.add_argument("--skin-file", type=str, default="last_hovered_skin.txt", help="Chemin du fichier last_hovered_skin.txt")
+    ap.add_argument("--inject-batch", type=str, default="", help="Batch à exécuter juste après l'écriture du skin (laisser vide pour désactiver)")
 
     args = ap.parse_args()
 

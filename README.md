@@ -69,7 +69,10 @@ The application runs automatically once started. It will:
 1. Monitor the game phase
 2. Detect when you're in champion select
 3. Use OCR to detect skin names as you hover over them
-4. Automatically inject the last detected skin when the countdown reaches 2 seconds
+4. Write the detected skin name to `last_hovered_skin.txt`
+5. Coordinate with an external injector to inject the skin
+
+**Note**: This application requires an external skin injector to actually modify game files. See `INJECTOR_SETUP.md` for setup instructions.
 
 ## Command Line Arguments
 
@@ -100,3 +103,29 @@ This modular version maintains 100% of the original functionality while providin
 - websocket-client: WebSocket support
 - mss: Screen capture
 - Pillow: Image processing
+
+## Roadmap - Next Steps
+
+To complete the setup and start using the skin changer:
+
+### 1. **Get a Skin Injector**
+- Obtain `cslol_tools_injector.py` or equivalent injection tool
+- Place it in the project root directory
+- Ensure it can read from `last_hovered_skin.txt`
+
+### 2. **Add Skin Files**
+- Create skin ZIP files for your desired champions
+- Organize them in `incoming_zips/[ChampionName]/` directory
+- Name files to match skin names (e.g., "KDA Ahri.zip")
+
+### 3. **Test Integration**
+- Run the application: `python main.py`
+- Test skin detection in champion select
+- Verify injection occurs at 2-second threshold
+
+### 4. **Troubleshooting**
+- Check `INJECTOR_SETUP.md` for detailed setup instructions
+- Verify skin file naming matches OCR detection
+- Test injector manually before integration
+
+**Note**: This application handles detection and coordination only. The actual skin injection requires external tools and skin files.

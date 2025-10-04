@@ -39,5 +39,5 @@ class SharedState:
     
     # Skin write config
     skin_write_ms: int = 1500
-    skin_file: str = r"C:\Users\alban\Desktop\Skin changer\skin injector\last_hovered_skin.txt"
-    inject_batch: Optional[str] = r"C:\Users\alban\Desktop\Skin changer\skin injector\inject_skin.bat"
+    skin_file: str = "last_hovered_skin.txt"
+    inject_batch: Optional[str] = None

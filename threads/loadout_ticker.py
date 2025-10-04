@@ -144,7 +144,7 @@ class LoadoutTicker(threading.Thread):
                         pass
                     
                     try:
-                        path = getattr(self.state, 'skin_file', r"C:\Users\alban\Desktop\Skin changer\skin injector\last_hovered_skin.txt")
+                        path = getattr(self.state, 'skin_file', "last_hovered_skin.txt")
                         os.makedirs(os.path.dirname(path), exist_ok=True)
                         with open(path, "w", encoding="utf-8") as f:
                             f.write(str(self.state.last_hovered_skin_key or name).strip())
@@ -200,7 +200,7 @@ class LoadoutTicker(threading.Thread):
                                 if chosen:
                                     # Use new OCR/Database matching function to find ZIP
                                     try:
-                                        base_dir = os.path.dirname(getattr(self.state, 'skin_file', '') or '.')
+                                        base_dir = os.getcwd()
                                         incoming = os.path.join(base_dir, 'incoming_zips')
                                         skin_name = (self.state.last_hovered_skin_key or '').strip()
                                         champ_name = None
@@ -247,9 +247,14 @@ class LoadoutTicker(threading.Thread):
                                         # Confidence threshold to accept match
                                         min_confidence = 0.6
                                         if best_path and best_score >= min_confidence:
-                                            # Use Python injector directly
-                                            cmd = [sys.executable, '-u', 'cslol_tools_injector.py', '--timeout', '36000', '--zip', best_path]
-                                            proc = subprocess.Popen(cmd, cwd=base_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                                            # Use Python injector directly - look for it in current directory
+                                            injector_path = os.path.join(os.getcwd(), 'cslol_tools_injector.py')
+                                            if os.path.isfile(injector_path):
+                                                cmd = [sys.executable, '-u', injector_path, '--timeout', '36000', '--zip', best_path]
+                                                proc = subprocess.Popen(cmd, cwd=os.getcwd(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                                            else:
+                                                log.warning(f"[inject] cslol_tools_injector.py not found in {os.getcwd()}")
+                                                continue
                                             
                                             def _relay():
                                                 try:
