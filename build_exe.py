@@ -167,6 +167,9 @@ if errorlevel 1 (
         print("1. Copy the entire 'dist' folder")
         print("2. Users run 'start.bat' or 'LoLSkinChanger/LoLSkinChanger.exe'")
         print("3. Make sure League of Legends is running first")
+        print("\nTo create Windows installer:")
+        print("1. Install Inno Setup from: https://jrsoftware.org/isdl.php")
+        print("2. Run: python create_installer.py")
         
         return True
     else:

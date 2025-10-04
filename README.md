@@ -269,3 +269,28 @@ The build process creates a single executable file that includes:
 **Note**: Users still need to have:
 - League of Legends installed and running
 - Tesseract OCR installed (for OCR functionality)
+
+## Windows Installer
+
+To create a proper Windows installer that registers the app in Windows Apps list:
+
+1. **Install Inno Setup**
+   - Download from: https://jrsoftware.org/isdl.php
+   - Install with default settings
+
+2. **Create the installer**
+   ```bash
+   python create_installer.py
+   ```
+
+3. **Install the app**
+   - Run `installer/LoLSkinChanger_Setup.exe` as Administrator
+   - App will appear in Windows "Installed Apps" list
+   - Includes proper uninstaller
+
+The installer provides:
+- Windows Apps list integration
+- Start Menu shortcuts
+- Desktop shortcut (optional)
+- Proper uninstaller
+- Registry entries for Windows recognition
