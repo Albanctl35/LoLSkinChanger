@@ -36,14 +36,16 @@ OCR tracer/
 │   └── image_processing.py    # Image processing for OCR
 ├── database/                  # Champion/skin database
 │   ├── __init__.py
-│   └── name_db.py             # Champion and skin name database
+│   ├── name_db.py             # Champion and skin name database
+│   └── multilang_db.py        # Multi-language database with auto-detection
 ├── lcu/                       # League Client API
 │   ├── __init__.py
 │   ├── client.py              # LCU API client
 │   └── utils.py               # LCU utility functions
 ├── state/                     # Shared state
 │   ├── __init__.py
-│   └── shared_state.py        # Shared state between threads
+│   ├── shared_state.py        # Shared state between threads
+│   └── last_hovered_skin.txt  # Last hovered skin file
 └── threads/                   # Threading components
     ├── __init__.py
     ├── phase_thread.py        # Game phase monitoring
@@ -56,6 +58,7 @@ OCR tracer/
 ## Features
 
 - **Fully Automated**: Just run `main.py` - no manual intervention required!
+- **Multi-Language Support**: Works with any League of Legends client language (17 languages supported)
 - **Smart Detection**: OCR automatically detects skin names during champion select
 - **Instant Injection**: Skins are injected 2 seconds before game starts
 - **Massive Collection**: 8,000+ skins for 150+ champions included
@@ -64,6 +67,7 @@ OCR tracer/
 - **CSLOL Tools**: Reliable injection using CSLOL modification tools
 - **Modular Architecture**: Clean, maintainable codebase
 - **Multi-threaded**: Optimal performance with concurrent processing
+- **Optimized Loading**: Only loads necessary language databases for better performance
 
 ## Installation
 
@@ -84,6 +88,21 @@ OCR tracer/
    
    # Optional: Enable WebSocket mode for better performance
    python main.py --ws
+   
+   # Optional: Specify language (auto-detection by default)
+   python main.py --language es_ES    # Spanish
+   python main.py --language fr_FR    # French
+   python main.py --language zh_CN    # Chinese Simplified
+   python main.py --language auto     # Auto-detect (default)
+   
+   # Optional: Specify OCR language for non-Latin alphabets
+   python main.py --lang kor          # Korean OCR
+   python main.py --lang chi_sim      # Chinese Simplified OCR
+   python main.py --lang ell          # Greek OCR
+   python main.py --lang auto         # Auto-detect OCR language (default)
+   
+   # Optional: Disable multi-language support
+   python main.py --no-multilang
    ```
 
 ## Usage
@@ -114,10 +133,62 @@ The system provides real-time status updates:
 
 ## Command Line Arguments
 
+### Core Options
 - `--verbose`: Enable verbose logging
 - `--ws`: Enable WebSocket mode for real-time events
 - `--tessdata`: Specify Tesseract tessdata directory
 - `--game-dir`: Specify League of Legends Game directory
+
+### Multi-Language Options
+- `--multilang`: Enable multi-language support (default)
+- `--no-multilang`: Disable multi-language support
+- `--language <lang>`: Specify language or auto-detection
+  - `auto`: Auto-detect language from LCU API (default)
+  - `en_US`: English (United States)
+  - `es_ES`: Spanish (Spain)
+  - `fr_FR`: French
+  - `de_DE`: German
+  - `zh_CN`: Chinese (Simplified)
+  - `ja_JP`: Japanese
+  - `ko_KR`: Korean
+  - `ru_RU`: Russian
+  - `pt_BR`: Portuguese (Brazil)
+  - `it_IT`: Italian
+  - `tr_TR`: Turkish
+  - `pl_PL`: Polish
+  - `hu_HU`: Hungarian
+  - `ro_RO`: Romanian
+  - `el_GR`: Greek
+  - `zh_TW`: Chinese (Traditional)
+  - `es_MX`: Spanish (Mexico)
+
+### OCR Language Options
+- `--lang <ocr_lang>`: Specify OCR language for text recognition
+  - `auto`: Auto-detect OCR language based on LCU language (default)
+  - `eng`: English
+  - `fra+eng`: French + English
+  - `spa+eng`: Spanish + English
+  - `deu+eng`: German + English
+  - `kor+eng`: Korean + English
+  - `chi_sim+eng`: Chinese Simplified + English
+  - `chi_tra+eng`: Chinese Traditional + English
+  - `jpn+eng`: Japanese + English
+  - `ell+eng`: Greek + English
+  - `rus+eng`: Russian + English
+  - `pol+eng`: Polish + English
+  - `tur+eng`: Turkish + English
+  - `hun+eng`: Hungarian + English
+  - `ron+eng`: Romanian + English
+  - `por+eng`: Portuguese + English
+  - `ita+eng`: Italian + English
+
+### Supported Languages
+The system supports 17 languages with automatic detection and optimized loading:
+- **Auto-Detection**: Automatically detects language from LCU API and OCR text
+- **Manual Selection**: Force specific language for better performance
+- **Optimized Loading**: Only loads necessary language databases
+- **OCR Language Mapping**: Automatically selects appropriate OCR language for non-Latin alphabets
+- **English Mapping**: All results logged in English for consistency
 
 ## Dependencies
 
@@ -138,6 +209,10 @@ The system provides real-time status updates:
 - **Wrong skin**: Verify skin names match the collection in `injection/incoming_zips/`
 - **No match**: Check OCR detection accuracy with `--verbose` flag
 - **Game not detected**: Ensure League of Legends is installed in default location
+- **Language issues**: Use `--language auto` for automatic detection or specify your client's language
+- **Performance issues**: Use manual language selection (`--language <lang>`) for better performance
+- **Non-Latin alphabet issues**: Use `--lang auto` for automatic OCR language detection or specify manually (e.g., `--lang kor` for Korean)
+- **OCR language not found**: Ensure Tesseract OCR has the required language packs installed
 
 ### System Requirements
 - Python 3.8+
