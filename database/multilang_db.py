@@ -65,11 +65,12 @@ class LanguageMatch:
 class MultiLanguageDB:
     """Multi-language database with automatic language detection"""
     
-    def __init__(self, auto_detect: bool = True, fallback_lang: str = "en_US"):
+    def __init__(self, auto_detect: bool = True, fallback_lang: str = "en_US", lcu_client=None):
         self.auto_detect = auto_detect
         self.fallback_lang = fallback_lang
         self.current_language = fallback_lang
         self.manual_language = None if auto_detect else fallback_lang
+        self.lcu_client = lcu_client
         
         # Initialize only necessary databases
         self.databases: Dict[str, NameDB] = {}
@@ -92,8 +93,18 @@ class MultiLanguageDB:
         
         # Load specified language if different from English
         if self.auto_detect:
-            # In auto-detect mode, we'll load languages on-demand
-            print(f"[MULTILANG] Auto-detect mode: languages will be loaded on-demand")
+            # In auto-detect mode, try to get language from LCU first
+            lcu_lang = self._get_lcu_language()
+            if lcu_lang and lcu_lang != "en_US":
+                try:
+                    self.databases[lcu_lang] = NameDB(lang=lcu_lang)
+                    self.current_language = lcu_lang
+                    print(f"[MULTILANG] Auto-detect mode: loaded LCU language '{lcu_lang}'")
+                except Exception as e:
+                    print(f"[MULTILANG] Failed to load LCU language '{lcu_lang}': {e}")
+                    print(f"[MULTILANG] Auto-detect mode: languages will be loaded on-demand")
+            else:
+                print(f"[MULTILANG] Auto-detect mode: languages will be loaded on-demand")
         else:
             # In manual mode, load the specified language
             if self.manual_language and self.manual_language != "en_US":
@@ -104,6 +115,20 @@ class MultiLanguageDB:
                     print(f"[MULTILANG] Failed to initialize {self.manual_language}: {e}")
                     # Fallback to English only
                     self.manual_language = "en_US"
+    
+    def _get_lcu_language(self) -> Optional[str]:
+        """Get client language from LCU API"""
+        if not self.lcu_client:
+            return None
+        
+        try:
+            lcu_lang = self.lcu_client.get_client_language()
+            if lcu_lang and lcu_lang in SUPPORTED_LANGUAGES:
+                return lcu_lang
+            return None
+        except Exception as e:
+            print(f"[MULTILANG] Failed to get LCU language: {e}")
+            return None
     
     def detect_language(self, text: str) -> LanguageMatch:
         """Detect language from OCR text"""

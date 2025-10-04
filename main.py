@@ -90,7 +90,7 @@ def main():
     if args.multilang:
         auto_detect = args.language.lower() == "auto"
         manual_lang = args.language if not auto_detect else args.dd_lang
-        multilang_db = MultiLanguageDB(auto_detect=auto_detect, fallback_lang=manual_lang)
+        multilang_db = MultiLanguageDB(auto_detect=auto_detect, fallback_lang=manual_lang, lcu_client=lcu)
         if auto_detect:
             log.info("Multi-language auto-detection enabled")
         else:

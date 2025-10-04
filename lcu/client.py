@@ -192,3 +192,14 @@ class LCU:
     def owned_skins(self) -> Optional[dict]:
         """Get owned skins"""
         return self.get("/lol-skins/v1/owned-skins")
+
+    def get_region_locale(self) -> Optional[dict]:
+        """Get client region and locale information"""
+        return self.get("/riotclient/region-locale")
+
+    def get_client_language(self) -> Optional[str]:
+        """Get client language from LCU API"""
+        locale_info = self.get_region_locale()
+        if locale_info and isinstance(locale_info, dict):
+            return locale_info.get("locale")
+        return None
