@@ -144,7 +144,7 @@ class LoadoutTicker(threading.Thread):
                         pass
                     
                     try:
-                        path = getattr(self.state, 'skin_file', "last_hovered_skin.txt")
+                        path = getattr(self.state, 'skin_file', "state/last_hovered_skin.txt")
                         # Only create directory if path has a directory component
                         dir_path = os.path.dirname(path)
                         if dir_path:  # Only create directory if it's not empty
