@@ -21,7 +21,6 @@ log = get_logger()
 
 def main():
     """Main entry point"""
-    print("*** NEW VERSION LOADED *** - Skin ownership detection removed")
     
     ap = argparse.ArgumentParser(description="Tracer combiné LCU + OCR (ChampSelect) — ROI lock + burst OCR + locks/timer fixes")
     
