@@ -9,6 +9,9 @@ LoLSkinChanger/
 ├── main.py                 # Main entry point
 ├── requirements.txt        # Python dependencies
 ├── README.md              # This file
+├── dependencies/           # Local dependency files
+│   ├── README.md          # Dependencies documentation
+│   └── tesserocr-2.8.0-cp311-cp311-win_amd64.whl  # Tesseract OCR wheel
 ├── utils/                 # Utility functions
 │   ├── __init__.py
 │   ├── normalization.py   # Text normalization utilities
@@ -53,6 +56,7 @@ LoLSkinChanger/
    ```bash
    pip install -r requirements.txt
    ```
+   This will automatically install the local tesserocr wheel from the `dependencies/` folder.
 3. Install Tesseract OCR on your system
 4. Run the application:
    ```bash

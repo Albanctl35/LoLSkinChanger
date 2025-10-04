@@ -3,7 +3,8 @@ opencv-python>=4.5.0
 psutil>=5.8.0
 requests>=2.25.0
 rapidfuzz>=2.0.0
-tesserocr>=2.5.0
 websocket-client>=1.0.0
 mss>=6.1.0
 Pillow>=8.0.0
+# Local tesserocr wheel for Windows
+./dependencies/tesserocr-2.8.0-cp311-cp311-win_amd64.whl
