@@ -5,7 +5,7 @@ A complete League of Legends skin changer that automatically detects skins using
 ## Project Structure
 
 ```
-OCR tracer/
+LoLSkinChanger/
 ├── main.py                     # Single automated launcher - RUN THIS!
 ├── requirements.txt            # Python dependencies
 ├── README.md                  # This file
@@ -19,17 +19,21 @@ OCR tracer/
 │   │   ├── cslol-diag.exe     # Diagnostics tool
 │   │   ├── cslol-dll.dll      # Core DLL
 │   │   └── [other tools]      # WAD utilities
-│   ├── incoming_zips/         # Skin collection (8,000+ skins)
-│   │   ├── Aatrox/
-│   │   ├── Ahri/
-│   │   └── [150+ champions]/
+│   ├── incoming_zips/         # Skin collection (8,277+ skins)
+│   │   └── skins/
+│   │       ├── Aatrox/
+│   │       ├── Ahri/
+│   │       └── [171 champions]/
 │   ├── mods/                  # Extracted skin mods
 │   └── overlay/               # Temporary overlay files
 ├── utils/                     # Utility functions
 │   ├── __init__.py
 │   ├── normalization.py       # Text normalization utilities
 │   ├── logging.py             # Logging configuration
-│   └── window_capture.py      # Windows window capture utilities
+│   ├── window_capture.py      # Windows window capture utilities
+│   ├── skin_downloader.py     # Skin download system
+│   ├── smart_skin_downloader.py # Smart downloader with rate limiting
+│   └── repo_downloader.py     # Repository ZIP downloader
 ├── ocr/                       # OCR functionality
 │   ├── __init__.py
 │   ├── backend.py             # OCR backend implementation
@@ -46,13 +50,16 @@ OCR tracer/
 │   ├── __init__.py
 │   ├── shared_state.py        # Shared state between threads
 │   └── last_hovered_skin.txt  # Last hovered skin file
-└── threads/                   # Threading components
-    ├── __init__.py
-    ├── phase_thread.py        # Game phase monitoring
-    ├── champ_thread.py        # Champion hover/lock monitoring
-    ├── ocr_thread.py          # OCR skin detection
-    ├── websocket_thread.py    # WebSocket event handling
-    └── loadout_ticker.py      # Loadout countdown timer
+├── threads/                   # Threading components
+│   ├── __init__.py
+│   ├── phase_thread.py        # Game phase monitoring
+│   ├── champ_thread.py        # Champion hover/lock monitoring
+│   ├── ocr_thread.py          # OCR skin detection
+│   ├── websocket_thread.py    # WebSocket event handling
+│   └── loadout_ticker.py      # Loadout countdown timer
+├── dependencies/              # Local dependencies
+│   └── tesserocr-2.8.0-cp311-cp311-win_amd64.whl
+└── [installer files]          # Windows installer components
 ```
 
 ## Features
@@ -62,8 +69,8 @@ OCR tracer/
 - **⚠️ Limitation**: Languages with non-Latin alphabets (Chinese, Japanese, Korean, Arabic, etc.) are currently not supported due to OCR limitations
 - **Smart Detection**: OCR automatically detects skin names during champion select
 - **Instant Injection**: Skins are injected 2 seconds before game starts
-- **Massive Collection**: 8,000+ skins for 150+ champions included
-- **Automatic Updates**: Automatically downloads latest skins from GitHub repository
+- **Massive Collection**: 8,277+ skins for 171 champions included
+- **Smart Downloads**: Efficient repository ZIP download with automatic updates
 - **Fuzzy Matching**: Smart matching system for accurate skin detection
 - **LCU Integration**: Real-time communication with League Client
 - **CSLOL Tools**: Reliable injection using CSLOL modification tools
@@ -73,7 +80,7 @@ OCR tracer/
 
 ## Installation
 
-1. Install Python 3.8 or higher
+1. Install Python 3.11 or higher
 2. Install dependencies:
    ```bash
    pip install -r requirements.txt
@@ -228,8 +235,26 @@ The system supports 17 languages with automatic detection and optimized loading:
 - **OCR language not found**: Ensure Tesseract OCR has the required language packs installed
 
 ### System Requirements
-- Python 3.8+
+- Python 3.11+
 - Tesseract OCR installed
 - League of Legends installed
 - Windows operating system (for CSLOL tools)
 - CSLOL tools present in `injection/tools/` directory
+
+## Windows Installer
+
+For easy installation on Windows, use the included installer:
+
+1. **Download the installer package**
+2. **Run `installer_complete.bat`**
+3. **Wait for automatic installation**
+4. **Done!** The application will be ready to use
+
+The installer automatically:
+- Downloads and installs Python 3.11
+- Downloads and installs Tesseract OCR
+- Installs the LoL Skin Changer application
+- Creates desktop and start menu shortcuts
+- Sets up all dependencies
+
+See `INSTALLER_README.md` for detailed installer documentation.

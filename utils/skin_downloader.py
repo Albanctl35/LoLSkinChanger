@@ -200,16 +200,26 @@ class SkinDownloader:
 
 def download_skins_on_startup(target_dir: Path = None, force_update: bool = False, 
                             max_champions: Optional[int] = None) -> bool:
-    """Convenience function to download skins at startup with smart rate limiting"""
+    """Convenience function to download skins at startup - tries multiple methods"""
     try:
-        # Try smart downloader first (with proper rate limiting)
-        from utils.smart_skin_downloader import download_skins_smart
-        log.info("Using smart skin downloader with rate limiting...")
-        return download_skins_smart(target_dir, force_update, max_champions)
+        # Method 1: Try repository ZIP download (most efficient)
+        try:
+            from utils.repo_downloader import download_skins_from_repo
+            log.info("Using repository ZIP downloader (most efficient)...")
+            return download_skins_from_repo(target_dir, force_update)
+        except ImportError:
+            log.debug("Repository downloader not available")
         
-    except ImportError:
-        # Fallback to original downloader
-        log.warning("Smart downloader not available, using basic downloader (may hit rate limits)")
+        # Method 2: Try smart downloader (with proper rate limiting)
+        try:
+            from utils.smart_skin_downloader import download_skins_smart
+            log.info("Using smart skin downloader with rate limiting...")
+            return download_skins_smart(target_dir, force_update, max_champions)
+        except ImportError:
+            log.debug("Smart downloader not available")
+        
+        # Method 3: Fallback to original downloader
+        log.warning("Using basic downloader (may hit rate limits)")
         downloader = SkinDownloader(target_dir)
         
         # Get current stats

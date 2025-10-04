@@ -94,6 +94,19 @@ class SmartSkinDownloader:
         
         return results
     
+    def get_repo_contents(self, path: str = "skins") -> List[Dict]:
+        """Get the contents of a directory from the GitHub repository"""
+        url = f"{self.api_base}/contents/{path}"
+        
+        response = self._make_request(url)
+        if response:
+            try:
+                return response.json()
+            except json.JSONDecodeError:
+                log.error(f"Failed to parse JSON for {path}")
+                return []
+        return []
+    
     def get_all_champion_data(self) -> Dict[str, List[Dict]]:
         """Get all champion data in one batch operation"""
         log.info("Fetching all champion data in batch...")
