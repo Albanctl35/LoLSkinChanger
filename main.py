@@ -17,6 +17,7 @@ from threads.ocr_thread import OCRSkinThread
 from threads.websocket_thread import WSEventThread
 from utils.logging import setup_logging, get_logger
 from injection.manager import InjectionManager
+from utils.skin_downloader import download_skins_on_startup
 
 log = get_logger()
 
@@ -120,11 +121,35 @@ def main():
     ap.add_argument("--multilang", action="store_true", default=True, help="Enable multi-language support")
     ap.add_argument("--no-multilang", action="store_false", dest="multilang", help="Disable multi-language support")
     ap.add_argument("--language", type=str, default="auto", help="Manual language selection (e.g., 'fr_FR', 'en_US', 'zh_CN', 'auto' for detection)")
+    
+    # Skin download arguments
+    ap.add_argument("--download-skins", action="store_true", default=True, help="Automatically download skins at startup")
+    ap.add_argument("--no-download-skins", action="store_false", dest="download_skins", help="Disable automatic skin downloading")
+    ap.add_argument("--force-update-skins", action="store_true", help="Force update all skins (re-download existing ones)")
+    ap.add_argument("--max-champions", type=int, default=None, help="Limit number of champions to download skins for (for testing)")
 
     args = ap.parse_args()
 
     setup_logging(args.verbose)
     log.info("Starting...")
+    
+    # Download skins if enabled
+    if args.download_skins:
+        log.info("Starting automatic skin download...")
+        try:
+            success = download_skins_on_startup(
+                force_update=args.force_update_skins,
+                max_champions=args.max_champions
+            )
+            if success:
+                log.info("Skin download completed successfully")
+            else:
+                log.warning("Skin download completed with some issues")
+        except Exception as e:
+            log.error(f"Failed to download skins: {e}")
+            log.info("Continuing without updated skins...")
+    else:
+        log.info("Automatic skin download disabled")
     
     # Initialize components
     # Initialize LCU first to get language info

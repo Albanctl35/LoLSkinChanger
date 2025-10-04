@@ -63,6 +63,7 @@ OCR tracer/
 - **Smart Detection**: OCR automatically detects skin names during champion select
 - **Instant Injection**: Skins are injected 2 seconds before game starts
 - **Massive Collection**: 8,000+ skins for 150+ champions included
+- **Automatic Updates**: Automatically downloads latest skins from GitHub repository
 - **Fuzzy Matching**: Smart matching system for accurate skin detection
 - **LCU Integration**: Real-time communication with League Client
 - **CSLOL Tools**: Reliable injection using CSLOL modification tools
@@ -104,6 +105,11 @@ OCR tracer/
    
    # Optional: Disable multi-language support
    python main.py --no-multilang
+   
+   # Optional: Control automatic skin downloading
+   python main.py --no-download-skins        # Disable automatic skin downloads
+   python main.py --force-update-skins       # Force update all skins
+   python main.py --max-champions 10         # Limit to first 10 champions (for testing)
    ```
 
 ## Usage
@@ -139,6 +145,12 @@ The system provides real-time status updates:
 - `--ws`: Enable WebSocket mode for real-time events
 - `--tessdata`: Specify Tesseract tessdata directory
 - `--game-dir`: Specify League of Legends Game directory
+
+### Skin Download Options
+- `--download-skins`: Enable automatic skin downloading (default)
+- `--no-download-skins`: Disable automatic skin downloading
+- `--force-update-skins`: Force update all skins (re-download existing ones)
+- `--max-champions <num>`: Limit number of champions to download skins for (for testing)
 
 ### Multi-Language Options
 - `--multilang`: Enable multi-language support (default)
