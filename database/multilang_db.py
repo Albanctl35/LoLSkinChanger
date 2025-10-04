@@ -187,9 +187,13 @@ class MultiLanguageDB:
     
     def find_skin_by_text(self, text: str, champ_id: Optional[int] = None) -> Optional[Entry]:
         """Find skin entry by text with automatic language detection"""
-        # Detect language
-        lang_match = self.detect_language(text)
-        detected_lang = lang_match.language
+        # In auto-detect mode, prefer LCU language over pattern detection
+        if self.auto_detect and self.current_language and self.current_language != "en_US":
+            detected_lang = self.current_language
+        else:
+            # Fallback to pattern-based detection
+            lang_match = self.detect_language(text)
+            detected_lang = lang_match.language
         
         # Get database for detected language
         db = self.databases.get(detected_lang)
@@ -199,7 +203,7 @@ class MultiLanguageDB:
                 try:
                     self.databases[detected_lang] = NameDB(lang=detected_lang)
                     db = self.databases[detected_lang]
-                    print(f"[MULTILANG] Loaded database for {detected_lang} on-demand")
+                    # print(f"[MULTILANG] Loaded database for {detected_lang} on-demand")  # Disabled for cleaner logs
                 except Exception as e:
                     print(f"[MULTILANG] Failed to load {detected_lang}: {e}")
                     db = self.databases.get(self.fallback_lang)
@@ -213,7 +217,7 @@ class MultiLanguageDB:
         # Find entry in detected language
         entry = self._find_entry_in_db(db, text, champ_id)
         if not entry:
-            print(f"[MULTILANG] No match found in {detected_lang}")
+            # print(f"[MULTILANG] No match found in {detected_lang}")  # Disabled for cleaner logs
             return None
         
         # print(f"[MULTILANG] Found match in {detected_lang}: {entry.key}")  # Disabled for cleaner logs
@@ -275,7 +279,11 @@ class MultiLanguageDB:
         if entry.skin_id and entry.skin_id > 0:
             english_skin = self.english_db.skin_name_by_id.get(entry.skin_id, "")
             if english_skin:
-                english_full = f"{english_champ} {english_skin}"
+                # Check if skin name already contains champion name to avoid duplication
+                if english_champ.lower() in english_skin.lower():
+                    english_full = english_skin
+                else:
+                    english_full = f"{english_champ} {english_skin}"
             else:
                 # Fallback: try to find skin name from champion data
                 english_full = english_champ

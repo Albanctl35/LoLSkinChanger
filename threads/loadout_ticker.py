@@ -80,7 +80,7 @@ class LoadoutTicker(threading.Thread):
                 log.info(f"[loadout #{self.ticker_id}] T-{int(remain_ms // 1000)}s")
             
             # Write last hovered skin at T<=threshold (configurable)
-            thresh = int(getattr(self.state, 'skin_write_ms', 1500) or 1500)
+            thresh = int(getattr(self.state, 'skin_write_ms', 2000) or 2000)
             if remain_ms <= thresh and not self.state.last_hover_written:
                 raw = self.state.last_hovered_skin_key or self.state.last_hovered_skin_slug \
                     or (str(self.state.last_hovered_skin_id) if self.state.last_hovered_skin_id else None)
@@ -128,21 +128,29 @@ class LoadoutTicker(threading.Thread):
                     except Exception:
                         pass
                 
-                name = getattr(self.state, 'ocr_last_text', None) or name
+                # For injection, we need the English name from the database
+                # Use the English skin name that was already processed by OCR thread
+                injection_name = getattr(self.state, 'last_hovered_skin_key', None)
+                if injection_name:
+                    name = injection_name
+                else:
+                    # Fallback to OCR text if no English name available
+                    name = getattr(self.state, 'ocr_last_text', None) or name
+                    if name:
+                        # If OCR text is like "Champion X Champion", normalize to "X Champion"
+                        try:
+                            champ_id = self.state.locked_champ_id or self.state.hovered_champ_id
+                            cname = (self.db.champ_name_by_id.get(champ_id or -1, "") or "").strip() if self.db else ""
+                            if cname:
+                                low = name.strip()
+                                if low.lower().startswith(cname.lower() + " ") and low.lower().endswith(" " + cname.lower()):
+                                    core = low[len(cname) + 1:-(len(cname) + 1)].strip()
+                                    if core:
+                                        name = f"{core} {cname}".strip()
+                        except Exception:
+                            pass
+                
                 if name:
-                    # If OCR text is like "Champion X Champion", normalize to "X Champion"
-                    try:
-                        champ_id = self.state.locked_champ_id or self.state.hovered_champ_id
-                        cname = (self.db.champ_name_by_id.get(champ_id or -1, "") or "").strip() if self.db else ""
-                        if cname:
-                            low = name.strip()
-                            if low.lower().startswith(cname.lower() + " ") and low.lower().endswith(" " + cname.lower()):
-                                core = low[len(cname) + 1:-(len(cname) + 1)].strip()
-                                if core:
-                                    name = f"{core} {cname}".strip()
-                    except Exception:
-                        pass
-                    
                     try:
                         path = getattr(self.state, 'skin_file', "state/last_hovered_skin.txt")
                         # Only create directory if path has a directory component
@@ -150,7 +158,7 @@ class LoadoutTicker(threading.Thread):
                         if dir_path:  # Only create directory if it's not empty
                             os.makedirs(dir_path, exist_ok=True)
                         with open(path, "w", encoding="utf-8") as f:
-                            f.write(str(self.state.last_hovered_skin_key or name).strip())
+                            f.write(str(name).strip())
                         self.state.last_hover_written = True
                         log.info(f"[loadout #{self.ticker_id}] wrote {path}: {name}")
                         

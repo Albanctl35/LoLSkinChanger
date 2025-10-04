@@ -103,7 +103,7 @@ def main():
     injection_manager = InjectionManager()
     
     # Configure skin writing
-    state.skin_write_ms = int(getattr(args, 'skin_threshold_ms', 1500) or 1500)
+    state.skin_write_ms = int(getattr(args, 'skin_threshold_ms', 2000) or 2000)
     state.skin_file = getattr(args, 'skin_file', state.skin_file) or state.skin_file
     state.inject_batch = getattr(args, 'inject_batch', state.inject_batch) or state.inject_batch
 
