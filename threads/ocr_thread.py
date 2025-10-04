@@ -163,139 +163,75 @@ class OCRSkinThread(threading.Thread):
             pass
 
     def _run_ocr_and_match(self, band_bin: np.ndarray):
-        """Run OCR and match against database"""
+        """Run OCR and match against database using raw Levenshtein distance"""
+        from rapidfuzz.distance import Levenshtein
+        
         txt = self.ocr.recognize(band_bin)
         
-        # Save EXACT OCR text (normalized spaces)
-        try:
-            cleaned_txt = re.sub(r"\s+", " ", txt.replace("\u00A0", " ").strip())
-        except Exception:
-            cleaned_txt = txt.strip()
-        
+        # Save raw OCR text for writing
         prev_txt = getattr(self.state, 'ocr_last_text', None)
-        self.state.ocr_last_text = cleaned_txt
+        self.state.ocr_last_text = txt
         
-        if cleaned_txt and cleaned_txt != prev_txt:
-            log.debug(f"[ocr:text] {cleaned_txt}")
+        if txt and txt != prev_txt:
+            log.debug(f"[ocr:text] {txt}")
         
         if not txt or not any(c.isalpha() for c in txt):
             return
         
-        # Keep exact OCR (cleaned of multiple spaces) for writing
-        try:
-            cleaned_txt = re.sub(r"\s+", " ", txt.replace("\u00A0", " ").strip())
-            self.state.ocr_last_text = cleaned_txt
-        except Exception:
-            self.state.ocr_last_text = txt.strip()
-        
-        norm_txt = normalize_text(txt)
         champ_id = self.state.hovered_champ_id or self.state.locked_champ_id
         
-        # Try multi-language database first
-        entry = None
-        if self.multilang_db:
-            entry = self.multilang_db.find_skin_by_text(txt, champ_id)
+        # Get all skin entries for this champion (no normalization)
+        pairs = self.db.normalized_entries(champ_id) or []
+        if not pairs and champ_id:
+            slug = self.db.slug_by_id.get(champ_id)
+            if slug:
+                self.db._ensure_champ(slug, champ_id)
+                pairs = self.db.normalized_entries(champ_id) or []
         
-        # Fallback to original database if multi-language fails
-        if not entry:
-            pairs = self.db.normalized_entries(champ_id) or []
-            skin_pairs = [(e, nk) for (e, nk) in pairs if e.kind == "skin"]
-            champ_pairs = [(e, nk) for (e, nk) in pairs if e.kind == "champion"]
-            
-            # Combine skins and champions for search
-            all_pairs = skin_pairs + champ_pairs
-            entries = None
-            labels = None
-            
-            if champ_id and all_pairs:
-                entries, labels = zip(*all_pairs)
-            else:
-                if not all_pairs and champ_id:
-                    slug = self.db.slug_by_id.get(champ_id)
-                    if slug:
-                        self.db._ensure_champ(slug, champ_id)
-                        pairs = self.db.normalized_entries(champ_id) or []
-                        skin_pairs = [(e, nk) for (e, nk) in pairs if e.kind == "skin"]
-                        champ_pairs = [(e, nk) for (e, nk) in pairs if e.kind == "champion"]
-                        all_pairs = skin_pairs + champ_pairs
-                        if all_pairs:
-                            entries, labels = zip(*all_pairs)
-            
-            if not entries: 
-                return
-        
-        # Handle scoring based on whether we found a multi-language match
-        if entry:
-            # Multi-language database found a match
-            score = 0.9  # High confidence for multi-language matches
-            # log.debug(f"[debug] Multi-language match found: '{norm_txt}' -> '{entry.key}' (score: {score:.3f})")  # Disabled for cleaner logs
-        else:
-            # Use our Levenshtein distance-based scoring system for fallback
-            best_score = 0.0
-            best_idx = None
-            best_entry = None
-            
-            for i, (entry, label) in enumerate(all_pairs):
-                score = levenshtein_score(norm_txt, label)
-                if score > best_score:
-                    best_score = score
-                    best_idx = i
-                    best_entry = entry
-            
-            if best_idx is None or best_score < self.args.min_conf:
-                # log.debug(f"[debug] No match found for OCR text: '{norm_txt}' (best score: {best_score:.3f} < {self.args.min_conf})")  # Disabled for cleaner logs
-                return
-            
-            idx = best_idx
-            score = best_score
-            entry = best_entry
-            # log.debug(f"[debug] Fallback match found: '{norm_txt}' -> '{labels[idx]}' (levenshtein score: {score:.3f})")  # Disabled for cleaner logs
-        
-        # If it's a champion (base skin), verify it's an exact match
-        if entry.kind == "champion":
-            champ_nm = self.db.champ_name_by_id.get(champ_id or -1, "")
-            if champ_nm:
-                champ_tokens = set(normalize_text(champ_nm).split())
-                txt_tokens = set(norm_txt.split())
-                # For base skins, we want an exact match
-                if not (champ_tokens == txt_tokens or 
-                       (champ_tokens and txt_tokens.issubset(champ_tokens) and len(norm_txt.split()) == len(champ_tokens))):
-                    # log.debug(f"[debug] Champion match not exact enough: '{norm_txt}' vs '{champ_nm}'")  # Disabled for cleaner logs
-                    return
-        elif entry.kind != "skin":
+        if not pairs:
             return
         
-        if entry.key != self.last_key:
-            # Use multi-language database if available
-            if self.multilang_db:
-                english_champ, english_full = self.multilang_db.get_english_name(entry)
+        # Find best match using raw Levenshtein distance
+        best_distance = float('inf')
+        best_entry = None
+        best_skin_name = None
+        
+        for entry, normalized_key in pairs:
+            if entry.kind not in ["skin", "champion"]:
+                continue
                 
-                if entry.kind == "champion":
-                    # For base skins, use English champion name
-                    log.info(f"[hover:skin] {english_champ} (skinId=0, champ={entry.champ_slug}, score={score:.3f})")
-                    self.state.last_hovered_skin_key = english_champ
-                    self.state.last_hovered_skin_id = 0  # 0 = base skin
-                    self.state.last_hovered_skin_slug = entry.champ_slug
-                else:
-                    # For normal skins, use English skin name
-                    log.info(f"[hover:skin] {english_full} (skinId={entry.skin_id}, champ={entry.champ_slug}, score={score:.3f})")
-                    self.state.last_hovered_skin_key = english_full
-                    self.state.last_hovered_skin_id = entry.skin_id
-                    self.state.last_hovered_skin_slug = entry.champ_slug
+            # Get the original skin name (not normalized)
+            if entry.kind == "skin":
+                skin_name = self.db.skin_name_by_id.get(entry.skin_id) or entry.key
+            else:  # champion (base skin)
+                skin_name = self.db.champ_name_by_id.get(entry.champ_id) or entry.key
+            
+            # Calculate raw Levenshtein distance
+            distance = Levenshtein.distance(txt, skin_name)
+            
+            if distance < best_distance:
+                best_distance = distance
+                best_entry = entry
+                best_skin_name = skin_name
+        
+        # Check if the best match meets confidence threshold
+        # Convert distance to a score: 1.0 - (distance / max_length)
+        max_len = max(len(txt), len(best_skin_name)) if best_skin_name else 1
+        score = 1.0 - (best_distance / max_len) if max_len > 0 else 0.0
+        
+        if best_entry is None or score < self.args.min_conf:
+            return
+        
+        if best_entry.key != self.last_key:
+            # Log with raw distance and score
+            if best_entry.kind == "champion":
+                log.info(f"[hover:skin] {best_skin_name} (skinId=0, champ={best_entry.champ_slug}, distance={best_distance}, score={score:.3f})")
+                self.state.last_hovered_skin_key = best_skin_name
+                self.state.last_hovered_skin_id = 0  # 0 = base skin
+                self.state.last_hovered_skin_slug = best_entry.champ_slug
             else:
-                # Fallback to original behavior
-                if entry.kind == "champion":
-                    # For base skins, use champion name
-                    champ_name = self.db.champ_name_by_id.get(entry.champ_id, entry.key)
-                    log.info(f"[hover:skin] {champ_name} (skinId=0, champ={entry.champ_slug}, score={score:.3f})")
-                    self.state.last_hovered_skin_key = champ_name
-                    self.state.last_hovered_skin_id = 0  # 0 = base skin
-                    self.state.last_hovered_skin_slug = entry.champ_slug
-                else:
-                    # For normal skins, use skin name
-                    disp = self.db.skin_name_by_id.get(entry.skin_id) or entry.key
-                    log.info(f"[hover:skin] {disp} (skinId={entry.skin_id}, champ={entry.champ_slug}, score={score:.3f})")
-                    self.state.last_hovered_skin_key = disp
-                    self.state.last_hovered_skin_id = entry.skin_id
-                    self.state.last_hovered_skin_slug = entry.champ_slug
-            self.last_key = entry.key
+                log.info(f"[hover:skin] {best_skin_name} (skinId={best_entry.skin_id}, champ={best_entry.champ_slug}, distance={best_distance}, score={score:.3f})")
+                self.state.last_hovered_skin_key = best_skin_name
+                self.state.last_hovered_skin_id = best_entry.skin_id
+                self.state.last_hovered_skin_slug = best_entry.champ_slug
+            self.last_key = best_entry.key
