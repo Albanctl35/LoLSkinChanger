@@ -1,0 +1,2 @@
+# Additional requirements for building the executable
+pyinstaller>=5.0.0

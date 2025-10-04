@@ -13,6 +13,10 @@ from urllib3.exceptions import InsecureRequestWarning
 
 def setup_logging(verbose: bool):
     """Setup logging configuration"""
+    # Force unbuffered output for console
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+    
     h = logging.StreamHandler(sys.stdout)
     fmt = "%(_when)s | %(levelname)-7s | %(message)s"
     
@@ -22,10 +26,17 @@ def setup_logging(verbose: bool):
             return super().format(record)
     
     h.setFormatter(_Fmt(fmt))
+    h.flush()  # Ensure immediate output
+    
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(h)
     root.setLevel(logging.DEBUG if verbose else logging.INFO)
+    
+    # Add a console print to ensure output is visible
+    print("=" * 60, flush=True)
+    print("LoL Skin Changer - Starting...", flush=True)
+    print("=" * 60, flush=True)
     
     # Suppress HTTPS/HTTP logs
     logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)

@@ -59,7 +59,9 @@ LoLSkinChanger/
 │   └── loadout_ticker.py      # Loadout countdown timer
 ├── dependencies/              # Local dependencies
 │   └── tesserocr-2.8.0-cp311-cp311-win_amd64.whl
-└── [installer files]          # Windows installer components
+└── [build files]              # Build system components
+    ├── build_exe.py           # PyInstaller build script
+    └── build_requirements.txt # Build dependencies
 ```
 
 ## Features
@@ -241,20 +243,29 @@ The system supports 17 languages with automatic detection and optimized loading:
 - Windows operating system (for CSLOL tools)
 - CSLOL tools present in `injection/tools/` directory
 
-## Windows Installer
+## Building Executable
 
-For easy installation on Windows, use the included installer:
+To create a standalone executable for distribution:
 
-1. **Download the installer package**
-2. **Run `installer_complete.bat`**
-3. **Wait for automatic installation**
-4. **Done!** The application will be ready to use
+1. **Install build dependencies**
+   ```bash
+   pip install -r build_requirements.txt
+   ```
 
-The installer automatically:
-- Downloads and installs Python 3.11
-- Downloads and installs Tesseract OCR
-- Installs the LoL Skin Changer application
-- Creates desktop and start menu shortcuts
-- Sets up all dependencies
+2. **Build the executable**
+   ```bash
+   python build_exe.py
+   ```
 
-See `INSTALLER_README.md` for detailed installer documentation.
+3. **Find the executable**
+   - The executable will be created in the `dist/` folder
+   - Run `start.bat` or `LoLSkinChanger.exe` directly
+
+The build process creates a single executable file that includes:
+- All Python dependencies
+- Application code and resources
+- No Python installation required on target systems
+
+**Note**: Users still need to have:
+- League of Legends installed and running
+- Tesseract OCR installed (for OCR functionality)
