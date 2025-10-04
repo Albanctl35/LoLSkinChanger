@@ -15,6 +15,7 @@ from threads.champ_thread import ChampThread
 from threads.ocr_thread import OCRSkinThread
 from threads.websocket_thread import WSEventThread
 from utils.logging import setup_logging, get_logger
+from injection.manager import InjectionManager
 
 log = get_logger()
 
@@ -27,7 +28,7 @@ def main():
     # OCR arguments
     ap.add_argument("--tessdata", type=str, default=None, help="Chemin du dossier tessdata (ex: C:\\Program Files\\Tesseract-OCR\\tessdata)")
     ap.add_argument("--psm", type=int, default=7)
-    ap.add_argument("--min-conf", type=float, default=0.58)
+    ap.add_argument("--min-conf", type=float, default=0.5)
     ap.add_argument("--lang", type=str, default="fra+eng", help="OCR lang (tesseract)")
     ap.add_argument("--tesseract-exe", type=str, default=None)
     
@@ -54,7 +55,8 @@ def main():
     
     # Threading arguments
     ap.add_argument("--phase-hz", type=float, default=2.0)
-    ap.add_argument("--ws", action="store_true")
+    ap.add_argument("--ws", action="store_true", default=True)
+    ap.add_argument("--no-ws", action="store_false", dest="ws", help="Disable WebSocket mode")
     ap.add_argument("--ws-ping", type=int, default=20)
     
     # Timer arguments
@@ -67,7 +69,7 @@ def main():
     args = ap.parse_args()
 
     setup_logging(args.verbose)
-    log.info("Démarrage…")
+    log.info("Starting...")
     
     # Initialize components
     ocr = OCR(lang=args.lang, psm=args.psm, tesseract_exe=args.tesseract_exe)
@@ -78,6 +80,9 @@ def main():
     lcu = LCU(args.lockfile)
     state = SharedState()
     
+    # Initialize injection manager
+    injection_manager = InjectionManager()
+    
     # Configure skin writing
     state.skin_write_ms = int(getattr(args, 'skin_threshold_ms', 1500) or 1500)
     state.skin_file = getattr(args, 'skin_file', state.skin_file) or state.skin_file
@@ -87,7 +92,7 @@ def main():
     t_phase = PhaseThread(lcu, state, interval=1.0/max(0.5, args.phase_hz), log_transitions=not args.ws)
     t_champ = None if args.ws else ChampThread(lcu, db, state, interval=0.25)
     t_ocr = OCRSkinThread(state, db, ocr, args, lcu)
-    t_ws = WSEventThread(lcu, db, state, ping_interval=args.ws_ping, timer_hz=args.timer_hz, fallback_ms=args.fallback_loadout_ms) if args.ws else None
+    t_ws = WSEventThread(lcu, db, state, ping_interval=args.ws_ping, timer_hz=args.timer_hz, fallback_ms=args.fallback_loadout_ms, injection_manager=injection_manager) if args.ws else None
 
     # Start threads
     t_phase.start()
@@ -97,7 +102,7 @@ def main():
     if t_ws: 
         t_ws.start()
 
-    print("[ok] prêt — tracer combiné. OCR actif UNIQUEMENT en Champ Select.", flush=True)
+    print("[ok] ready — combined tracer. OCR active ONLY in Champ Select.", flush=True)
 
     last_phase = None
     try:
@@ -108,7 +113,7 @@ def main():
                     if state.last_hovered_skin_key:
                         log.info(f"[launch:last-skin] {state.last_hovered_skin_key} (skinId={state.last_hovered_skin_id}, champ={state.last_hovered_skin_slug})")
                     else:
-                        log.info("[launch:last-skin] (aucun skin survolé détecté)")
+                        log.info("[launch:last-skin] (no hovered skin detected)")
                 last_phase = ph
             time.sleep(0.2)
     except KeyboardInterrupt:

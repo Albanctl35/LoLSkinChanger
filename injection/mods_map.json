@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "mods": [
+    {
+      "name": "Blood Lord Vladimir",
+      "dir": "Blood Lord Vladimir",
+      "enabled": true
+    }
+  ]
+}

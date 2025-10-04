@@ -52,12 +52,15 @@ if is_windows():
             if not IsWindowVisible(hwnd) or IsIconic(hwnd): 
                 return True
             t = _win_text(hwnd).lower()
-            if hint.lower() in t and ("league" in t or "riot client" in t):
+            # More specific matching for League client
+            if (("league of legends" in t or "riot client" in t) and 
+                ("champion select" in t or "match found" in t or "ready check" in t or hint.lower() in t)):
                 R = _win_rect(hwnd)
                 if R:
                     l, t, r, b = R
                     w, h = r - l, b - t
-                    if w >= 600 and h >= 350: 
+                    # More restrictive size requirements for League client
+                    if w >= 800 and h >= 600: 
                         rects.append((l, t, r, b))
             return True
         

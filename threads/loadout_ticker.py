@@ -5,16 +5,14 @@ Loadout countdown ticker thread
 """
 
 import os
-import sys
 import time
 import threading
-import subprocess
 from typing import Optional
 from lcu.client import LCU
 from state.shared_state import SharedState
 from database.name_db import NameDB
 from utils.logging import get_logger
-from utils.normalization import normalize_text, levenshtein_score
+from utils.normalization import normalize_text
 
 log = get_logger()
 
@@ -23,7 +21,8 @@ class LoadoutTicker(threading.Thread):
     """High-frequency loadout countdown ticker"""
     
     def __init__(self, lcu: LCU, state: SharedState, hz: int, fallback_ms: int, 
-                 ticker_id: int, mode: str = "auto", db: Optional[NameDB] = None):
+                 ticker_id: int, mode: str = "auto", db: Optional[NameDB] = None, 
+                 injection_manager=None):
         super().__init__(daemon=True)
         self.lcu = lcu
         self.state = state
@@ -32,6 +31,7 @@ class LoadoutTicker(threading.Thread):
         self.ticker_id = int(ticker_id)
         self.mode = mode
         self.db = db
+        self.injection_manager = injection_manager
 
     def run(self):
         """Main ticker loop"""
@@ -145,151 +145,42 @@ class LoadoutTicker(threading.Thread):
                     
                     try:
                         path = getattr(self.state, 'skin_file', "last_hovered_skin.txt")
-                        os.makedirs(os.path.dirname(path), exist_ok=True)
+                        # Only create directory if path has a directory component
+                        dir_path = os.path.dirname(path)
+                        if dir_path:  # Only create directory if it's not empty
+                            os.makedirs(dir_path, exist_ok=True)
                         with open(path, "w", encoding="utf-8") as f:
                             f.write(str(self.state.last_hovered_skin_key or name).strip())
                         self.state.last_hover_written = True
                         log.info(f"[loadout #{self.ticker_id}] wrote {path}: {name}")
                         
-                        # Launch injection batch (optional) - skip for base skins
+                        # Launch injection directly - skip for base skins
                         if self.state.last_hovered_skin_id == 0:
                             log.info(f"[inject] skipping base skin injection (skinId=0)")
-                        else:
+                        elif self.injection_manager:
                             try:
-                                batch = (getattr(self.state, 'inject_batch', None) or '').strip()
-                                # Normalize target directory of .txt
-                                basedir = os.path.abspath(os.path.dirname(path))
+                                log.info(f"[inject] starting injection for: {name}")
                                 
-                                # If we received a directory, try known names in it
-                                candidates = []
-                                if batch:
-                                    if os.path.isdir(batch):
-                                        root = os.path.abspath(batch)
-                                        candidates.extend([
-                                            os.path.join(root, n) for n in ['run_cslol_tools.bat', 'run_cslol_tools.cmd',
-                                                'fast_inject.bat', 'fast_inject.cmd',
-                                                'inject_skin.bat', 'inject_last_hovered_skin.bat', 'inject_last_hovered.bat',
-                                                'run_injector.bat', 'run_cslol_tools.bat', 'run_cslol_tools.cmd', 'inject.bat']
-                                        ])
-                                    else:
-                                        candidates.append(os.path.abspath(batch))
+                                # Track if we've been in InProgress phase
+                                has_been_in_progress = False
                                 
-                                # Always try next to the written file
-                                candidates.extend([
-                                    os.path.join(basedir, n) for n in [
-                                        'fast_inject.bat', 'fast_inject.cmd',
-                                        'inject_skin.bat', 'inject_last_hovered_skin.bat', 'inject_last_hovered.bat',
-                                        'run_injector.bat', 'run_cslol_tools.bat', 'run_cslol_tools.cmd', 'inject.bat']
-                                ])
+                                # Create callback to check if game ended
+                                def game_ended_callback():
+                                    nonlocal has_been_in_progress
+                                    if self.state.phase == "InProgress":
+                                        has_been_in_progress = True
+                                    # Only stop after we've been in InProgress and then left it
+                                    return has_been_in_progress and self.state.phase != "InProgress"
                                 
-                                # Deduplicate while preserving order
-                                seen = set()
-                                ordered = []
-                                for c in candidates:
-                                    c2 = os.path.normpath(c)
-                                    if c2 not in seen:
-                                        seen.add(c2)
-                                        ordered.append(c2)
-                                
-                                chosen = None
-                                for c in ordered:
-                                    if os.path.isfile(c):
-                                        chosen = c
-                                        break
-                                
-                                if chosen:
-                                    # Use new OCR/Database matching function to find ZIP
-                                    try:
-                                        base_dir = os.getcwd()
-                                        incoming = os.path.join(base_dir, 'incoming_zips')
-                                        skin_name = (self.state.last_hovered_skin_key or '').strip()
-                                        champ_name = None
-                                        champ_slug = getattr(self.state, 'last_hovered_skin_slug', None) or None
-                                        cid = getattr(self.state, 'locked_champ_id', None)
-                                        
-                                        if self.db and cid:
-                                            try:
-                                                champ_name = self.db.champ_name_by_id.get(cid)
-                                            except Exception:
-                                                champ_name = None
-                                        
-                                        # Search in directories by priority order
-                                        cand_dirs = []
-                                        if champ_name: 
-                                            cand_dirs.append(os.path.join(incoming, str(champ_name)))
-                                        if champ_slug: 
-                                            cand_dirs.append(os.path.join(incoming, str(champ_slug)))
-                                        cand_dirs.append(incoming)  # Root directory as last resort
-                                        
-                                        best_path, best_score = None, 0.0
-                                        target_norm = normalize_text(skin_name)
-                                        
-                                        for d in cand_dirs:
-                                            try:
-                                                if not os.path.isdir(d):
-                                                    continue
-                                                for fn in os.listdir(d):
-                                                    if not fn.lower().endswith('.zip'):
-                                                        continue
-                                                    name_no_ext = os.path.splitext(fn)[0]
-                                                    score = levenshtein_score(target_norm, normalize_text(name_no_ext))
-                                                    
-                                                    # Bonus if skin name is contained in filename
-                                                    if target_norm and target_norm in normalize_text(name_no_ext):
-                                                        score += 0.1
-                                                    
-                                                    if score > best_score:
-                                                        best_score = score
-                                                        best_path = os.path.join(d, fn)
-                                            except Exception:
-                                                continue
-                                        
-                                        # Confidence threshold to accept match
-                                        min_confidence = 0.6
-                                        if best_path and best_score >= min_confidence:
-                                            # Use Python injector directly - look for it in current directory
-                                            injector_path = os.path.join(os.getcwd(), 'cslol_tools_injector.py')
-                                            if os.path.isfile(injector_path):
-                                                cmd = [sys.executable, '-u', injector_path, '--timeout', '36000', '--zip', best_path]
-                                                proc = subprocess.Popen(cmd, cwd=os.getcwd(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-                                            else:
-                                                log.warning(f"[inject] cslol_tools_injector.py not found in {os.getcwd()}")
-                                                continue
-                                            
-                                            def _relay():
-                                                try:
-                                                    for line in iter(proc.stdout.readline, ''):
-                                                        if not line: 
-                                                            break
-                                                        log.info(line.rstrip())
-                                                except Exception:
-                                                    pass
-                                            
-                                            threading.Thread(target=_relay, daemon=True).start()
-                                            log.info(f"[inject] found match (score: {best_score:.3f}) → {best_path}")
-                                        else:
-                                            # Fallback to existing batch if no match found
-                                            if chosen and os.path.isfile(chosen):
-                                                proc = subprocess.Popen(['cmd.exe', '/c', chosen], cwd=os.path.dirname(chosen) or None, shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-                                                
-                                                def _relay_cslol_logs():
-                                                    try:
-                                                        for line in iter(proc.stdout.readline, ''):
-                                                            if not line: 
-                                                                break
-                                                            log.info(line.rstrip())
-                                                    except Exception:
-                                                        pass
-                                                
-                                                threading.Thread(target=_relay_cslol_logs, daemon=True).start()
-                                                log.info(f"[inject] fallback to batch → {chosen}")
-                                            else:
-                                                log.warning(f"[inject] no suitable ZIP found (best score: {best_score:.3f}) and no batch available")
-                                                
-                                    except Exception as ie:
-                                        log.warning(f"[inject] failed: {ie}")
-                            except Exception as ie:
-                                log.warning(f"[inject] failed: {ie}")
+                                success = self.injection_manager.inject_skin_immediately(name, stop_callback=game_ended_callback)
+                                if success:
+                                    log.info(f"[inject] successfully injected: {name}")
+                                else:
+                                    log.error(f"[inject] failed to inject: {name}")
+                            except Exception as e:
+                                log.error(f"[inject] injection error: {e}")
+                        else:
+                            log.warning(f"[inject] no injection manager available")
                     except Exception as e:
                         log.warning(f"[loadout #{self.ticker_id}] write failed: {e}")
 

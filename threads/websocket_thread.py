@@ -31,7 +31,8 @@ class WSEventThread(threading.Thread):
     """WebSocket event thread with WAMP + lock counter + timer"""
     
     def __init__(self, lcu: LCU, db: NameDB, state: SharedState, ping_interval: int = 20, 
-                 ping_timeout: int = 10, timer_hz: int = 1000, fallback_ms: int = 0):
+                 ping_timeout: int = 10, timer_hz: int = 1000, fallback_ms: int = 0, 
+                 injection_manager=None):
         super().__init__(daemon=True)
         self.lcu = lcu
         self.db = db
@@ -41,6 +42,7 @@ class WSEventThread(threading.Thread):
         self.ws = None
         self.timer_hz = timer_hz
         self.fallback_ms = fallback_ms
+        self.injection_manager = injection_manager
         self.ticker: Optional[LoadoutTicker] = None
 
     def _maybe_start_timer(self, sess: dict):
@@ -82,7 +84,7 @@ class WSEventThread(threading.Thread):
                     mode = ("finalization" if (phase_timer == "FINALIZATION" and left_ms > 0) else "lcu-probe")
                     log.info(f"[loadout] start id={self.state.current_ticker} mode={mode} remaining_ms={left_ms} ({left_ms/1000:.3f}s) [hz={self.timer_hz}]")
                     if self.ticker is None or not self.ticker.is_alive():
-                        self.ticker = LoadoutTicker(self.lcu, self.state, self.timer_hz, self.fallback_ms, ticker_id=self.state.current_ticker, mode=mode, db=self.db)
+                        self.ticker = LoadoutTicker(self.lcu, self.state, self.timer_hz, self.fallback_ms, ticker_id=self.state.current_ticker, mode=mode, db=self.db, injection_manager=self.injection_manager)
                         self.ticker.start()
 
     def _handle_api_event(self, payload: dict):

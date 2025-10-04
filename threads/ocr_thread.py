@@ -56,18 +56,24 @@ class OCRSkinThread(threading.Thread):
             if self.args.capture == "window" and os.name == "nt":
                 rect = find_league_window_rect(self.args.window_hint)
                 if not rect: 
+                    log.debug("[ocr] League window not found, falling back to monitor capture")
                     return None
                 l, t, r, b = rect
+                log.debug(f"[ocr] League window found: {l},{t},{r},{b} (size: {r-l}x{b-t})")
                 mon = {"left": l, "top": t, "width": r - l, "height": b - t}
                 full = np.array(sct.grab(mon), dtype=np.uint8)[:, :, :3]
                 x1, y1, x2, y2 = choose_band(full)
-                return (l + x1, t + y1, l + x2, t + y2)
+                roi_abs = (l + x1, t + y1, l + x2, t + y2)
+                log.debug(f"[ocr] ROI calculated: {roi_abs}")
+                return roi_abs
             else:
+                log.debug(f"[ocr] Using monitor capture (mode: {self.args.capture})")
                 shot = sct.grab(monitor)
                 full = np.array(shot, dtype=np.uint8)[:, :, :3]
                 x1, y1, x2, y2 = choose_band(full)
                 return (monitor["left"] + x1, monitor["top"] + y1, monitor["left"] + x2, monitor["top"] + y2)
-        except Exception:
+        except Exception as e:
+            log.debug(f"[ocr] Error calculating ROI: {e}")
             return None
 
     def run(self):
@@ -221,17 +227,13 @@ class OCRSkinThread(threading.Thread):
                 best_entry = entry
         
         if best_idx is None or best_score < self.args.min_conf:
-            log.debug(f"[debug] No match found for OCR text: '{norm_txt}' (best score: {best_score:.3f})")
+            log.debug(f"[debug] No match found for OCR text: '{norm_txt}' (best score: {best_score:.3f} < {self.args.min_conf})")
             return
         
         idx = best_idx
         score = best_score
         entry = best_entry
         log.debug(f"[debug] Match found: '{norm_txt}' -> '{labels[idx]}' (levenshtein score: {score:.3f})")
-        
-        # Verify match is valid
-        if score < self.args.min_conf:
-            return
         
         # If it's a champion (base skin), verify it's an exact match
         if entry.kind == "champion":
