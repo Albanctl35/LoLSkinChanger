@@ -1,2 +1,12 @@
 *.pyc
 .venv311/*
+injection/overlay/
+injection/tools/hashes.game.txt
+injection/tools/*.exe
+injection/tools/*.dll
+injection/tools/*.txt
+injection/tools/*.json
+injection/mods/
+injection/incoming_zips/
+last_hovered_skin.txt
+hover_buffer.txt
