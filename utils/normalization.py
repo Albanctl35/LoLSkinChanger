@@ -10,14 +10,19 @@ from rapidfuzz.distance import Levenshtein
 
 
 def normalize_text(s: str) -> str:
-    """Normalize text for robust matching"""
+    """Normalize text for robust matching while preserving Unicode characters"""
     if not s: 
         return ""
     s = s.replace("\u00A0", " ").replace("：", ":")
-    s = unicodedata.normalize("NFKD", s)
-    s = "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+    # Use NFC normalization to preserve composed characters (Korean, Greek, etc.)
+    s = unicodedata.normalize("NFC", s)
+    # Only remove combining marks that are not part of composed characters
+    # This preserves Korean jamo composition and Greek accents
+    s = "".join(ch for ch in s if unicodedata.category(ch) not in ["Mn", "Me"])
     s = s.lower()
-    s = re.sub(r"[^a-z0-9\s]", " ", s)
+    # Preserve Unicode characters instead of removing them
+    # Only remove control characters and excessive whitespace
+    s = re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", s)  # Remove control characters
     s = re.sub(r"\s+", " ", s).strip()
     return s
 

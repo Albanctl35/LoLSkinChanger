@@ -27,24 +27,25 @@ def get_ocr_language(lcu_lang: str, manual_lang: str = None) -> str:
         return manual_lang
     
     # Map LCU languages to Tesseract languages
+    # Use only the specific language (no +eng fallback) for better accuracy
     ocr_lang_map = {
         "en_US": "eng",
-        "es_ES": "spa+eng", 
-        "es_MX": "spa+eng",
-        "fr_FR": "fra+eng",
-        "de_DE": "deu+eng",
-        "it_IT": "ita+eng",
-        "pt_BR": "por+eng",
-        "ru_RU": "rus+eng",
-        "pl_PL": "pol+eng",
-        "tr_TR": "tur+eng",
-        "el_GR": "ell+eng",
-        "hu_HU": "hun+eng",
-        "ro_RO": "ron+eng",
-        "zh_CN": "chi_sim+eng",
-        "zh_TW": "chi_tra+eng",
-        "ja_JP": "jpn+eng",
-        "ko_KR": "kor+eng",
+        "es_ES": "spa", 
+        "es_MX": "spa",
+        "fr_FR": "fra",
+        "de_DE": "deu",
+        "it_IT": "ita",
+        "pt_BR": "por",
+        "ru_RU": "rus",
+        "pl_PL": "pol",
+        "tr_TR": "tur",
+        "el_GR": "ell",
+        "hu_HU": "hun",
+        "ro_RO": "ron",
+        "zh_CN": "chi_sim",
+        "zh_TW": "chi_tra",
+        "ja_JP": "jpn",
+        "ko_KR": "kor",
     }
     
     return ocr_lang_map.get(lcu_lang, "eng")  # Default to English
@@ -96,7 +97,7 @@ def main():
     # OCR performance arguments
     ap.add_argument("--burst-hz", type=float, default=50.0)
     ap.add_argument("--idle-hz", type=float, default=0.0, help="ré-émission périodique (0=off)")
-    ap.add_argument("--diff-threshold", type=float, default=0.005)
+    ap.add_argument("--diff-threshold", type=float, default=0.001)
     ap.add_argument("--burst-ms", type=int, default=280)
     ap.add_argument("--min-ocr-interval", type=float, default=0.11)
     ap.add_argument("--second-shot-ms", type=int, default=120)

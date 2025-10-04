@@ -13,7 +13,7 @@ import cv2
 class OCR:
     """OCR backend using tesserocr"""
     
-    def __init__(self, lang: str = "fra+eng", psm: int = 7, tesseract_exe: Optional[str] = None):
+    def __init__(self, lang: str = "eng", psm: int = 7, tesseract_exe: Optional[str] = None):
         self.lang = lang
         self.psm = int(psm)
         self.backend = None
@@ -37,10 +37,8 @@ class OCR:
             
             self.api.SetVariable("preserve_interword_spaces", "1")
             self.api.SetVariable("user_defined_dpi", "240")
-            self.api.SetVariable("tessedit_char_whitelist",
-                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-                "ÀÂÄÃÇÉÈÊËÎÏÌÍÔÖÒÓÙÛÜÚàâäãçéèêëîïìíôöòóùûüúÑñ"
-                "0123456789 .-':")
+            # Remove character whitelist to allow all Unicode characters
+            # This enables recognition of Korean, Chinese, Greek, and other Unicode characters
             self.backend = "tesserocr"
         except ImportError:
             raise ImportError("tesserocr is required for OCR functionality")
